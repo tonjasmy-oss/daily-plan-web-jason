@@ -258,11 +258,20 @@ async function initPurchasePage() {
     if (state.editingId) rec._id = state.editingId;
     if (state.editingId) {
       updatePurchase(state.editingId, rec);
+      /* 驳回后重提交: 把旧审批记录删掉, 重新走 pending */
+      if (!isDraft) {
+        removePurchaseApproval(state.editingId);
+        createPurchaseApproval(state.editingId, rec, user);
+      }
       toast(isDraft ? '草稿已更新' : '申购已重新提交', 'success');
     } else {
       var created = createPurchase(rec);
       state.editingId = created._id;
       state.editingStatus = rec.status;
+      /* 非草稿(提交) → 自动写入一条 pending 审批记录, 进审批管理 */
+      if (!isDraft) {
+        createPurchaseApproval(created._id, rec, user);
+      }
       toast(isDraft ? '草稿已保存' : ('申购已提交,合计 ' + fmt(p.total)), 'success');
     }
     if (!isDraft) {
@@ -401,6 +410,39 @@ async function initPurchasePage() {
   paintMyList();
   updateEditingBanner();
 
+  /* ---- 物资申购进审批管理: 写/删 approvas 表 (type='purchase') ---- */
+  function buildApprovalTitle(rec) {
+    /* 标题: 物资申购 2026-09-12 · 项目A · ¥4,500.00 */
+    var proj = state.projectId ? pbProjectName(state.projectId) : '';
+    return '物资申购 ' + (rec.date || '') +
+      (proj ? ' · ' + proj : '') +
+      (rec.total ? ' · ¥' + Number(rec.total).toFixed(2) : '');
+  }
+  function createPurchaseApproval(purchaseId, rec, user) {
+    if (typeof createApproval !== 'function') return null;
+    return createApproval({
+      type: 'purchase',
+      ref_id: purchaseId,
+      title: buildApprovalTitle(rec),
+      applicant: user.name || '',
+      reason: rec.reason || '',
+      payload: { total: rec.total, items_count: (rec.items || []).length },
+      status: 'pending'
+    });
+  }
+  function removePurchaseApproval(purchaseId) {
+    if (typeof DB === 'undefined' || !DB.approvals) return;
+    var stale = DB.approvals.filter(function (a) { return a && a.type === 'purchase' && a.ref_id === purchaseId; });
+    stale.forEach(function (a) {
+      if (typeof deleteApproval === 'function') deleteApproval(a._id);
+    });
+  }
+  function pbProjectName(id) {
+    var ps = (typeof loadProjects === 'function' ? loadProjects() : []) || [];
+    var hit = ps.filter(function (p) { return p._id === id; })[0];
+    return hit ? hit.name : '';
+  }
+
   document.getElementById('pcProject').addEventListener('change', function () {
     state.projectId = this.value; clearFieldError(this);
   });
@@ -425,6 +467,28 @@ async function initPurchasePage() {
   });
   document.getElementById('pcSaveDraft').addEventListener('click', function () { save(true); });
   document.getElementById('pcSubmit').addEventListener('click', function () { save(false); });
+
+  /* 来自「审批管理 → 查看明细」的跳转: ?ref=<purchase_id> */
+  var refId = queryParam('ref');
+  if (refId) {
+    setTimeout(function () {
+      var rec = (loadPurchases() || []).find(function (r) { return r._id === refId; });
+      if (!rec) { toast('未找到该申购记录', 'warn'); return; }
+      loadIntoEditor(refId);
+      /* 已通过/已提交的记录: 把操作按钮置灰, 只读查看 */
+      if (rec.status === 'approved' || rec.status === 'submitted') {
+        var btns = document.querySelectorAll('#pcSaveDraft, #pcSubmit, #pcAddItem');
+        btns.forEach(function (b) { b.disabled = true; b.title = '该记录已提交/通过, 不可修改'; });
+        document.querySelectorAll('.task-card-remove').forEach(function (b) { b.style.display = 'none'; });
+        var banner = document.getElementById('pcEditingBanner');
+        if (banner) {
+          banner.hidden = false;
+          banner.innerHTML = '<div class="pc-editing-inner"><span>正在查看 ' +
+            (rec.status === 'approved' ? '已通过' : '已提交') + ' 的申购 (只读, 不可修改)</span></div>';
+        }
+      }
+    }, 100);
+  }
 }
 window.initPurchasePage = initPurchasePage;
 window.addEventListener('DOMContentLoaded', initPurchasePage);

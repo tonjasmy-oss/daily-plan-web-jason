@@ -194,6 +194,9 @@ CREATE TABLE IF NOT EXISTS purchases (
   applicant TEXT DEFAULT '',
   approver TEXT DEFAULT '',
   approved_at TEXT DEFAULT '',
+  rejected_at TEXT DEFAULT '',
+  rejected_reason TEXT DEFAULT '',
+  reviewed_by TEXT DEFAULT '',
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
@@ -386,6 +389,9 @@ def row_to_purchase(r):
         'reason': r['reason'], 'status': r['status'],
         'applicant': r['applicant'], 'approver': r['approver'],
         'approved_at': r['approved_at'],
+        'rejected_at': _col(r, 'rejected_at', ''),
+        'rejected_reason': _col(r, 'rejected_reason', ''),
+        'reviewed_by': _col(r, 'reviewed_by', ''),
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
     }
 
@@ -461,6 +467,9 @@ def migrate_db():
                 ('total', "REAL DEFAULT 0"),
                 ('items_json', "TEXT DEFAULT '[]'"),
                 ('project_id', "TEXT DEFAULT ''"),
+                ('rejected_at', "TEXT DEFAULT ''"),
+                ('rejected_reason', "TEXT DEFAULT ''"),
+                ('reviewed_by', "TEXT DEFAULT ''"),
             ],
         }
         for table, cols in new_cols.items():
@@ -866,15 +875,18 @@ def upsert_purchase(conn, data):
               data.get('reason', ''),
               data.get('status', 'draft'),
               data.get('applicant', ''), data.get('approver', ''),
-              data.get('approved_at', ''))
+              data.get('approved_at', ''),
+              data.get('rejected_at', ''),
+              data.get('rejected_reason', ''),
+              data.get('reviewed_by', ''))
     old = conn.execute('SELECT id FROM purchases WHERE id=?', (pid,)).fetchone()
     if old:
         conn.execute(
-            'UPDATE purchases SET date=?,name=?,spec=?,unit=?,qty=?,total=?,items_json=?,project_id=?,reason=?,status=?,applicant=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
+            'UPDATE purchases SET date=?,name=?,spec=?,unit=?,qty=?,total=?,items_json=?,project_id=?,reason=?,status=?,applicant=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,updated_at=? WHERE id=?',
             fields + (now, pid))
     else:
         conn.execute(
-            'INSERT INTO purchases (id,date,name,spec,unit,qty,total,items_json,project_id,reason,status,applicant,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO purchases (id,date,name,spec,unit,qty,total,items_json,project_id,reason,status,applicant,approver,approved_at,rejected_at,rejected_reason,reviewed_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (pid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return pid
