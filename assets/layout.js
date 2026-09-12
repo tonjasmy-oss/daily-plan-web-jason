@@ -41,6 +41,7 @@ var NAV_ITEMS = [
   { id: 'purchase',   label: '物资申购',   icon: 'purchase',   href: 'purchase.html',   roles: null,                  group: '填报' },
   { id: 'reports',    label: '历史记录',   icon: 'reports',    href: 'reports.html',    roles: null,                  group: '管理' },
   { id: 'approval',   label: '审批管理',   icon: 'approval',   href: 'approval.html',   roles: ['admin','manager'],   group: '管理' },
+  { id: 'purchase-mgmt', label: '物资管理', icon: 'purchase',  href: 'purchase-mgmt.html', roles: ['admin','manager'],group: '管理' },
   { id: 'tasks',      label: '任务看板',   icon: 'tasks',      href: 'tasks.html',      roles: null,                  group: '管理' },
   { id: 'projects',   label: '项目管理',   icon: 'projects',   href: 'projects.html',   roles: null,                  group: '管理' },
   { id: 'members',    label: '人员管理',   icon: 'members',    href: 'members.html',    roles: ['admin','manager'],   group: '系统设置' },
