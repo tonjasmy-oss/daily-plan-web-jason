@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="format-detection" content="telephone=no">
+<title>登录 - 工程管理系统</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Hanken+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="login-page">
+
+<!-- 左品牌渐变区 -->
+<section class="login-brand" aria-label="品牌区">
+  <header class="login-brand-top">
+    <div class="login-brand-logo">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5Z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="login-brand-name">
+      工程管理系统
+      <small>ENGINEERING OPS SUITE</small>
+    </div>
+  </header>
+
+  <div class="login-brand-mid">
+    <h1>打造更高效的<br>工程协作体验</h1>
+    <p>一站式日计划 · 周报 · 物资 · 审批 · 角色权限管理,让工地团队的所有工作清晰可见、有序推进。</p>
+    <div class="login-chip-row">
+      <span class="login-chip"><span class="login-chip-dot"></span>日计划填报</span>
+      <span class="login-chip"><span class="login-chip-dot"></span>周计划管理</span>
+      <span class="login-chip"><span class="login-chip-dot"></span>物资申购</span>
+      <span class="login-chip"><span class="login-chip-dot"></span>审批流</span>
+      <span class="login-chip"><span class="login-chip-dot"></span>权限角色</span>
+      <span class="login-chip"><span class="login-chip-dot"></span>团队协作</span>
+    </div>
+  </div>
+
+  <footer class="login-brand-foot">© 2026 Engineering Ops Suite · v5.0 · 多端协同版本</footer>
+</section>
+
+<!-- 右登录区 -->
+<section class="login-panel" aria-label="登录区">
+  <div class="login-panel-inner">
+    <h2>欢迎回来</h2>
+    <span class="muted">登录以继续你的工程管理工作</span>
+
+    <div class="login-tabs" role="tablist">
+      <button type="button" class="login-tab active" data-tab="login">登录</button>
+      <button type="button" class="login-tab" data-tab="register">注册</button>
+    </div>
+
+    <div id="loginForm" data-pane="login">
+      <form id="loginFormEl" autocomplete="on" novalidate>
+        <div class="login-form-row">
+          <label class="login-label" for="loginAccount">账号</label>
+          <input type="text" id="loginAccount" name="account" class="login-input" placeholder="请输入工号或邮箱" autocomplete="username" required>
+        </div>
+        <div class="login-form-row">
+          <label class="login-label" for="loginPassword">密码</label>
+          <input type="password" id="loginPassword" name="password" class="login-input" placeholder="请输入密码" autocomplete="current-password" required>
+        </div>
+        <div class="login-meta-row">
+          <label><input type="checkbox" id="rememberMe" checked> 记住我</label>
+          <a class="login-forgot" href="#" onclick="event.preventDefault(); toast('请联系管理员重置密码');">忘记密码?</a>
+        </div>
+        <button type="submit" class="login-btn" id="btnSubmit">登 录</button>
+      </form>
+
+      <div class="login-divider">其他方式登录</div>
+
+      <button type="button" class="login-wx" id="btnWxLogin">
+        <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M8.5 4C4.91 4 2 6.46 2 9.5c0 1.66.85 3.13 2.19 4.16L3.5 16l2.5-1.34c.78.21 1.6.34 2.5.34.18 0 .36-.01.54-.02A6.4 6.4 0 0 1 8 12.5C8 9.46 10.91 7 14.5 7c.27 0 .54.02.81.05C14.41 5.22 11.69 4 8.5 4Zm-2 3a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm4 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/>
+          <path d="M22 14.5C22 11.46 19.09 9 15.5 9S9 11.46 9 14.5 11.91 20 15.5 20c.9 0 1.72-.13 2.5-.34L20.5 21l-.69-2.34C21.15 17.63 22 16.16 22 14.5Zm-9 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm4 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/>
+        </svg>
+        微信快捷登录
+      </button>
+
+      <div class="login-hint">
+        <b>演示账号:</b><code>admin</code>(管理员) · <code>gcg1123</code>(张工)<br>
+        <b>提示:</b>演示模式下密码可任意填写。
+      </div>
+
+      <div class="login-error" id="loginError"></div>
+
+      <div style="display:flex;gap:8px;margin-top:18px;">
+        <button type="button" class="btn btn-secondary" style="flex:1;" id="btnGoDashboard">直接进入仪表盘</button>
+        <button type="button" class="btn btn-secondary" style="flex:1;" id="btnResetSeed">重置种子数据</button>
+      </div>
+    </div>
+
+    <div id="registerForm" data-pane="register" hidden style="padding:24px 0;">
+      <div class="empty-state">
+        <h4>暂未开放注册</h4>
+        <p>请联系系统管理员开通账号。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="assets/common.js"></script>
+<script src="assets/login.js"></script>
+</body>
+</html>

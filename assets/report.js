@@ -1,0 +1,837 @@
+/* ============================================================
+ * 日报表填报页 (W3/W4) — v6 升级
+ * 标题可勾选: 日常维修每日完成情况 / 计划工作每日完成情况
+ * 任务字段: 工作内容 / 实施人员(多选 chip) / 完成时间 / 完成·未完成 + 未完成原因
+ * 状态机: draft → submitted → signed / rejected
+ * ============================================================ */
+
+async function initReportPage() {
+  var user = await requireLogin();
+  if (!user) return;
+
+  var recordId = queryParam('id');
+  var isEdit = !!recordId;
+  var members = loadMembers().filter(function (m) { return m.active !== false; });
+
+  var content = renderPage({
+    active: 'report',
+    pageHtml: '<div class="detail-loading">加载中…</div>'
+  });
+
+  var form = null;
+
+  /* ===== 类别定义(可勾选标题) ===== */
+  var CATEGORIES = [
+    { id: 'repair', label: '日常维修每日完成情况' },
+    { id: 'plan',   label: '计划工作每日完成情况' }
+  ];
+
+  function defaultTask() {
+    return {
+      id: uuid().substring(0, 8),
+      content: '',
+      members: [],
+      startTime: '',
+      endTime: '',
+      status: 'done',
+      reason: '',
+      /* 附件上传: 处理前/处理中/处理后,非必填。值为 base64 dataURL */
+      attachments: { before: '', during: '', after: '' }
+    };
+  }
+
+  function defaultForm() {
+    return {
+      date: todayStr(),
+      categories: { repair: false, plan: false },
+      tasks: [defaultTask()],
+      remarks: '',
+      status: 'draft',
+      approver: '',
+      rejected_reason: '',
+      signatureImg: '',
+      submitted_at: '',
+      signed_at: '',
+      rejected_at: ''
+    };
+  }
+
+  /* ---------- 数据加载 ---------- */
+  function loadForm() {
+    if (!isEdit) { form = defaultForm(); render(); return; }
+    fetch('/api/reports/' + encodeURIComponent(recordId), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.record) {
+          toast('记录不存在', 'error');
+          setTimeout(function () { location.href = 'reports.html'; }, 800);
+          return;
+        }
+        var r = res.record;
+        var cats = (r.categories && typeof r.categories === 'object') ? r.categories : {};
+        form = {
+          _id: r._id,
+          date: r.date || todayStr(),
+          categories: {
+            repair: !!cats.repair,
+            plan: !!cats.plan
+          },
+          tasks: (r.tasks && r.tasks.length > 0)
+            ? r.tasks.map(function (t) {
+                var att = (t.attachments && typeof t.attachments === 'object') ? t.attachments : {};
+                return {
+                  id: t.id || uuid().substring(0, 8),
+                  content: t.content || '',
+                  members: Array.isArray(t.members) ? t.members.slice() : [],
+                  startTime: t.startTime || '',
+                  endTime: t.endTime || '',
+                  status: t.status === 'undone' ? 'undone' : 'done',
+                  reason: t.reason || '',
+                  attachments: {
+                    before: att.before || '',
+                    during: att.during || '',
+                    after:  att.after  || ''
+                  }
+                };
+              })
+            : [defaultTask()],
+          remarks: r.remarks || '',
+          status: r.status || 'draft',
+          approver: r.approver || '',
+          rejected_reason: r.rejected_reason || '',
+          signatureImg: r.signature || '',
+          submitted_at: r.submitted_at || '',
+          signed_at: r.signed_at || '',
+          rejected_at: r.rejected_at || '',
+          created_at: r.created_at
+        };
+        render();
+      })
+      .catch(function () {
+        toast('加载失败', 'error');
+        setTimeout(function () { location.href = 'reports.html'; }, 800);
+      });
+  }
+
+  /* ---------- 校验 ---------- */
+  function validateForm(forSubmit) {
+    if (!form.date) { toast('请选择日期', 'error'); return false; }
+
+    /* 至少勾选一个标题分类 */
+    if (!form.categories.repair && !form.categories.plan) {
+      toast('请至少勾选一个标题分类', 'error');
+      return false;
+    }
+
+    var validTasks = form.tasks.filter(function (t) { return t.content && t.content.trim(); });
+    if (validTasks.length === 0) { toast('请至少填写一条工作内容', 'error'); return false; }
+
+    /* 校验每条任务的必填项 */
+    var errIdx = -1, errType = '';
+    for (var i = 0; i < form.tasks.length; i++) {
+      var t = form.tasks[i];
+      if (!t.content || !t.content.trim()) continue;
+      /* 实施人员: 至少 1 人 */
+      if (!t.members || t.members.length === 0) {
+        errIdx = i; errType = 'members'; break;
+      }
+      /* 完成时间: 起止都必填 */
+      if (!t.startTime || !t.endTime) {
+        errIdx = i; errType = 'time'; break;
+      }
+      /* 未完成时,原因必填 */
+      if (t.status === 'undone' && !(t.reason || '').trim()) {
+        errIdx = i; errType = 'reason'; break;
+      }
+    }
+    if (errIdx >= 0) {
+      var msgs = {
+        members: '请勾选任务"' + (errIdx + 1) + '"的实施人员',
+        time:    '请填写任务"' + (errIdx + 1) + '"的完成时间',
+        reason:  '请填写任务"' + (errIdx + 1) + '"的未完成原因'
+      };
+      toast(msgs[errType] || '请完整填写任务信息', 'error');
+      highlightTaskError(errIdx, errType);
+      return false;
+    }
+
+    if (forSubmit && form.status === 'submitted' && !form.approver) {
+      toast('请填写审批人', 'error'); return false;
+    }
+    return true;
+  }
+
+  function highlightTaskError(idx, type) {
+    var row = document.querySelector('.rp-task-row[data-i="' + idx + '"]');
+    if (!row) return;
+    row.classList.add('has-row-error');
+    var map = {
+      members: '.rp-task-members',
+      time:    '.rp-task-time',
+      reason:  '.rp-task-reason'
+    };
+    var el = row.querySelector(map[type]);
+    if (el) {
+      el.classList.add('has-error');
+      var input = el.querySelector('input, textarea, select');
+      if (input) input.focus();
+    }
+  }
+
+  /* ---------- 保存 ---------- */
+  function saveForm(done, showMsg) {
+    var payload = {
+      _id: isEdit ? recordId : (form._id || null),
+      date: form.date,
+      categories: form.categories,
+      status: form.status,
+      remarks: form.remarks,
+      approver: form.approver,
+      rejected_reason: form.rejected_reason,
+      signature: form.signatureImg,
+      tasks: form.tasks.filter(function (t) { return t.content && t.content.trim(); })
+        .map(function (t) {
+          return Object.assign({}, t, {
+            attachments: {
+              before: (t.attachments && t.attachments.before) || '',
+              during: (t.attachments && t.attachments.during) || '',
+              after:  (t.attachments && t.attachments.after)  || ''
+            }
+          });
+        })
+    };
+    fetch('/api/reports', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.record) {
+        form._id = res.record._id;
+        recordId = res.record._id;
+        isEdit = true;
+        form.submitted_at = res.record.submitted_at || form.submitted_at;
+        form.signed_at = res.record.signed_at || form.signed_at;
+        form.rejected_at = res.record.rejected_at || form.rejected_at;
+      }
+      if (showMsg) {
+        toast('操作成功');
+        setTimeout(function () { location.href = 'reports.html'; }, 900);
+      } else if (done) {
+        done();
+      } else {
+        toast('保存成功');
+        render();
+      }
+    }).catch(function () {
+      toast('保存失败', 'error');
+    });
+  }
+
+  /* ---------- 状态操作 ---------- */
+  function submitForm() {
+    if (!validateForm(true)) return;
+    confirmDialog('确认提交', '提交后将进入待审批状态，是否继续？', function () {
+      form.status = 'submitted';
+      saveForm(null, true);
+    });
+  }
+
+  function signForm() {
+    if (!form.approver) { toast('请先填写审批人', 'error'); return; }
+    confirmDialog('确认签名', '签名后将表示审批通过，是否继续？', function () {
+      openSignaturePad({
+        onConfirm: function (dataURL) {
+          form.signatureImg = dataURL;
+          form.status = 'signed';
+          saveForm(null, true);
+        }
+      });
+    });
+  }
+
+  function rejectForm() {
+    var reason = (document.getElementById('r_rejectReason') || {}).value || '';
+    if (!reason.trim()) { toast('请填写驳回原因', 'error'); return; }
+    form.rejected_reason = reason.trim();
+    confirmDialog('确认驳回', '确定要驳回此申请吗？', function () {
+      form.status = 'rejected';
+      saveForm(null, true);
+    });
+  }
+
+  function deleteRecord() {
+    confirmDialog('确认删除', '删除后无法恢复，确定要删除吗？', function () {
+      fetch('/api/reports/' + encodeURIComponent(recordId), { method: 'DELETE', credentials: 'same-origin' })
+        .then(function () {
+          toast('删除成功');
+          setTimeout(function () { location.href = 'reports.html'; }, 700);
+        });
+    });
+  }
+
+  /* ---------- 渲染 ---------- */
+  function render() {
+    if (!form) return;
+    var st = form.status;
+    var editable = (st === 'draft');
+
+    /* 标题分类单选区(只能勾选其一) */
+    var categoriesHtml =
+      '<div class="section rp-section">' +
+        '<h3>标题分类 <span class="sec-meta">请选择填报类别(单选,只能勾选其一)</span></h3>' +
+        '<div class="rp-categories">' +
+          CATEGORIES.map(function (c) {
+            var checked = !!form.categories[c.id];
+            return '<label class="rp-category-chip' + (checked ? ' active' : '') + (editable ? '' : ' disabled') + '">' +
+              '<input type="radio" name="rp_category" data-cat="' + c.id + '" ' + (checked ? 'checked' : '') + (editable ? '' : 'disabled') + '>' +
+              '<span class="rp-category-check">' + rpIconCheck() + '</span>' +
+              '<span class="rp-category-label">' + esc(c.label) + '</span>' +
+            '</label>';
+          }).join('') +
+        '</div>' +
+      '</div>';
+
+    /* 任务列表 */
+    var tasksHtml = form.tasks.map(function (t, i) {
+      return renderTaskRow(t, i, editable);
+    }).join('');
+
+    /* 审批人 / 驳回 */
+    var approverSection = '';
+    if (st === 'submitted' || st === 'rejected' || st === 'signed') {
+      approverSection =
+        '<div class="detail-section">' +
+          '<h3>审批人</h3>' +
+          (st === 'submitted'
+            ? '<input class="input" id="r_approver" value="' + esc(form.approver) + '" placeholder="请输入审批人姓名">'
+            : '<div class="approver-display">' + esc(form.approver || '未填写') + '</div>') +
+        '</div>';
+      if (st === 'rejected') {
+        approverSection +=
+          '<div class="detail-section">' +
+            '<h3>驳回原因</h3>' +
+            '<textarea class="textarea" id="r_rejectReason" placeholder="请输入驳回原因">' + esc(form.rejected_reason) + '</textarea>' +
+          '</div>';
+      }
+    }
+
+    /* 签名 */
+    var signatureSection = '';
+    if (st === 'submitted' && !form.signatureImg) {
+      signatureSection =
+        '<div class="detail-section">' +
+          '<h3>签名</h3>' +
+          '<button class="btn btn-primary" id="btnOpenSign">✍ 点击签名</button>' +
+        '</div>';
+    }
+    if (form.signatureImg) {
+      signatureSection =
+        '<div class="detail-section">' +
+          '<h3>签名</h3>' +
+          '<img class="signature-image" src="' + form.signatureImg + '" alt="签名">' +
+        '</div>';
+    }
+
+    /* 底部操作 */
+    var actionButtons = '';
+    if (st === 'draft') {
+      actionButtons =
+        '<button class="btn btn-primary btn-lg" id="btnSubmit">提交</button>' +
+        (isEdit ? '<button class="btn btn-default btn-lg" id="btnSaveDraft">保存草稿</button>' : '');
+    } else if (st === 'submitted') {
+      actionButtons =
+        '<button class="btn btn-success btn-lg" id="btnSign">✓ 批准签名</button>' +
+        '<button class="btn btn-danger btn-lg" id="btnReject">驳回</button>';
+    } else if (st === 'rejected') {
+      actionButtons =
+        '<button class="btn btn-primary btn-lg" id="btnResubmit">重新提交</button>';
+    }
+
+    content.innerHTML =
+      '<div class="detail-back"><a href="reports.html">‹ 日报记录</a></div>' +
+      '<div class="page-header-row">' +
+        '<h2 class="page-title-text">' + (isEdit ? '编辑记录' : '新建日报表') +
+          '<span class="report-status-tag report-status-' + esc(st) + '">' + (REPORT_STATUS_TEXT[st] || st) + '</span>' +
+        '</h2>' +
+        '<div class="page-actions">' +
+          '<button class="btn btn-default" id="btnExportExcel">导出 Excel</button>' +
+        '</div>' +
+      '</div>' +
+
+      categoriesHtml +
+
+      '<div class="section rp-section">' +
+        '<div class="form-section">' +
+          '<label class="form-label">填报日期</label>' +
+          '<input class="input" type="date" id="r_date" value="' + esc(form.date) + '"' + (editable ? '' : ' disabled') + '>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="section rp-section">' +
+        '<div class="section-header-row"><h3 style="margin:0;">工作内容 <span class="sec-meta">每条任务填写工作内容 / 实施人员 / 完成时间 / 完成状态</span></h3>' +
+          (editable ? '<button class="btn-link" id="btnAddTask">+ 添加任务</button>' : '') +
+        '</div>' +
+        '<div class="rp-task-list" id="rpTaskList">' + tasksHtml + '</div>' +
+      '</div>' +
+
+      '<div class="section rp-section">' +
+        '<label class="form-label">备注</label>' +
+        '<textarea class="textarea" id="r_remarks" placeholder="请输入备注信息(选填)"' + (editable ? '' : ' disabled') + '>' + esc(form.remarks) + '</textarea>' +
+      '</div>' +
+
+      approverSection +
+      signatureSection +
+      (actionButtons ? '<div class="report-actions">' + actionButtons + '</div>' : '') +
+      (isEdit && st === 'draft' ?
+        '<div class="report-actions"><button class="btn btn-danger-outline btn-lg" id="btnDelete">删除记录</button></div>' : '');
+
+    bindEvents();
+  }
+
+  /* 渲染单个任务行 */
+  function renderTaskRow(t, i, editable) {
+    var undone = t.status === 'undone';
+    /* 兜底: 旧记录无 attachments 时,补默认值 */
+    if (!t.attachments || typeof t.attachments !== 'object') {
+      t.attachments = { before: '', during: '', after: '' };
+    }
+
+    var memberChips = (t.members || []).map(function (mid) {
+      var m = members.find(function (mm) { return mm._id === mid; });
+      if (!m) return '';
+      var roleLabel = ROLE_DISPLAY[m.role] || (ROLE_TEXT[m.role] || '');
+      var roleBg = ROLE_TAG_BG[m.role] || 'rgba(126,132,168,.15)';
+      var roleColor = ROLE_COLOR[m.role] || '#7E84A8';
+      return '<span class="rp-task-member-chip">' +
+              '<span class="rp-role-tag" style="background:' + roleBg + ';color:' + roleColor + ';">' + esc(roleLabel) + '</span>' +
+              '<span class="rp-task-member-name">' + esc(m.name) + '</span>' +
+              (editable ? '<button class="rp-task-member-x" data-i="' + i + '" data-id="' + esc(mid) + '" type="button">×</button>' : '') +
+            '</span>';
+    }).join('');
+
+    return '<div class="rp-task-row" data-i="' + i + '">' +
+      '<div class="rp-task-num">' + (i + 1) + '</div>' +
+      '<div class="rp-task-body">' +
+
+        /* 工作内容 */
+        '<div class="rp-task-field rp-task-content">' +
+          '<label class="rp-task-label">工作内容 <span class="required">*</span></label>' +
+          '<input class="input rp-task-content-input" data-i="' + i + '" data-k="content" value="' + esc(t.content || '') + '" placeholder="请输入本条工作内容"' + (editable ? '' : ' disabled') + '>' +
+        '</div>' +
+
+        /* 实施人员 */
+        '<div class="rp-task-field rp-task-members">' +
+          '<label class="rp-task-label">实施人员 <span class="required">*</span> <span class="rp-task-hint">点击 + 添加预设人员</span></label>' +
+          '<div class="rp-task-members-row">' +
+            memberChips +
+            (editable ? '<button class="rp-task-add-member" data-i="' + i + '" type="button">' +
+              rpIconPlus() + '<span>添加人员</span>' +
+            '</button>' : '') +
+          '</div>' +
+        '</div>' +
+
+        /* 完成时间 */
+        '<div class="rp-task-field rp-task-time">' +
+          '<label class="rp-task-label">完成时间 <span class="required">*</span> <span class="rp-task-hint">几点几时至几点几分</span></label>' +
+          '<div class="rp-task-time-row">' +
+            '<input class="input rp-time-input" type="time" data-i="' + i + '" data-k="startTime" value="' + esc(t.startTime || '') + '"' + (editable ? '' : ' disabled') + '>' +
+            '<span class="rp-time-sep">至</span>' +
+            '<input class="input rp-time-input" type="time" data-i="' + i + '" data-k="endTime" value="' + esc(t.endTime || '') + '"' + (editable ? '' : ' disabled') + '>' +
+          '</div>' +
+        '</div>' +
+
+        /* 完成状态 */
+        '<div class="rp-task-field rp-task-status">' +
+          '<label class="rp-task-label">完成状态 <span class="required">*</span></label>' +
+          '<div class="rp-task-status-row">' +
+            '<label class="rp-status-radio' + (t.status === 'done' ? ' active' : '') + ' rp-status-done' + (editable ? '' : ' disabled') + '">' +
+              '<input type="radio" name="rp_status_' + i + '" data-i="' + i + '" data-k="status" value="done"' + (t.status === 'done' ? ' checked' : '') + (editable ? '' : ' disabled') + '>' +
+              '<span class="rp-status-icon">' + rpIconCheck() + '</span>' +
+              '<span>完成</span>' +
+            '</label>' +
+            '<label class="rp-status-radio' + (undone ? ' active' : '') + ' rp-status-undone' + (editable ? '' : ' disabled') + '">' +
+              '<input type="radio" name="rp_status_' + i + '" data-i="' + i + '" data-k="status" value="undone"' + (undone ? ' checked' : '') + (editable ? '' : ' disabled') + '>' +
+              '<span class="rp-status-icon">' + rpIconX() + '</span>' +
+              '<span>未完成</span>' +
+            '</label>' +
+          '</div>' +
+        '</div>' +
+
+        /* 附件上传 - 非必填 (处理前/处理中/处理后) */
+        renderAttachmentField(i, t, editable) +
+
+        /* 未完成原因(条件显示+必填) */
+        '<div class="rp-task-field rp-task-reason' + (undone ? '' : ' hidden') + '">' +
+          '<label class="rp-task-label rp-task-reason-label">未完成原因 <span class="required">*</span></label>' +
+          '<textarea class="textarea rp-task-reason-input" data-i="' + i + '" data-k="reason" rows="2" placeholder="请说明未完成的原因"' + (editable ? '' : ' disabled') + '>' + esc(t.reason || '') + '</textarea>' +
+        '</div>' +
+
+      '</div>' +
+
+      /* 顶部删除按钮 */
+      (editable ? '<button class="rp-task-remove" data-i="' + i + '" type="button" title="删除任务">' + rpIconTrash() + '</button>' : '') +
+    '</div>';
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  function bindEvents() {
+    var dateInput = document.getElementById('r_date');
+    if (dateInput) dateInput.onchange = function () { form.date = dateInput.value; };
+
+    var remarksEl = document.getElementById('r_remarks');
+    if (remarksEl) remarksEl.oninput = function () { form.remarks = remarksEl.value; };
+
+    /* 分类单选切换 */
+    document.querySelectorAll('.rp-category-chip input[type="radio"]').forEach(function (r) {
+      r.onchange = function () {
+        if (!this.checked) return;
+        /* 单选: 清除全部,只保留当前 */
+        CATEGORIES.forEach(function (c) { form.categories[c.id] = false; });
+        form.categories[this.dataset.cat] = true;
+        render();
+      };
+    });
+
+    /* 任务字段统一代理(内容 / 时间 / 状态 / 原因) */
+    document.getElementById('rpTaskList').addEventListener('input', function (e) {
+      var t = e.target;
+      var i = parseInt(t.dataset.i, 10);
+      if (isNaN(i)) return;
+      var k = t.dataset.k;
+      if (!k) return;
+      if (k === 'content' || k === 'startTime' || k === 'endTime' || k === 'reason') {
+        form.tasks[i][k] = t.value;
+        /* 清除错误态 */
+        if (t.classList.contains('input-error')) t.classList.remove('input-error');
+        var row = t.closest('.rp-task-row');
+        if (row && row.classList.contains('has-row-error')) row.classList.remove('has-row-error');
+        var field = t.closest('.rp-task-field');
+        if (field && field.classList.contains('has-error')) field.classList.remove('has-error');
+      }
+    });
+
+    /* 任务状态切换 */
+    document.querySelectorAll('.rp-task-status input[type="radio"]').forEach(function (r) {
+      r.onchange = function () {
+        var i = parseInt(this.dataset.i, 10);
+        form.tasks[i].status = this.value;
+        render();
+      };
+    });
+
+    /* 删除单条任务 */
+    document.querySelectorAll('.rp-task-remove').forEach(function (btn) {
+      btn.onclick = function () {
+        var i = parseInt(this.dataset.i, 10);
+        if (form.tasks.length <= 1) {
+          form.tasks[0] = defaultTask();
+        } else {
+          form.tasks.splice(i, 1);
+        }
+        render();
+      };
+    });
+
+    /* 实施人员 chip 移除 */
+    document.querySelectorAll('.rp-task-member-x').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var i = parseInt(this.dataset.i, 10);
+        var mid = this.dataset.id;
+        var arr = form.tasks[i].members;
+        var idx = arr.indexOf(mid);
+        if (idx >= 0) arr.splice(idx, 1);
+        render();
+      };
+    });
+
+    /* 添加人员 */
+    document.querySelectorAll('.rp-task-add-member').forEach(function (btn) {
+      btn.onclick = function () {
+        var i = parseInt(this.dataset.i, 10);
+        openMemberPickerForTask(i);
+      };
+    });
+
+    /* 附件上传 - file change */
+    document.querySelectorAll('.rp-attach-file').forEach(function (inp) {
+      inp.onchange = function () {
+        var i = parseInt(this.dataset.taskI, 10);
+        var slot = this.dataset.slot;
+        var file = this.files && this.files[0];
+        if (!file) return;
+        readImageFile(file,
+          function (dataURL) { updateAttachment(i, slot, dataURL); },
+          function (msg) { toast(msg, 'error'); inp.value = ''; }
+        );
+        this.value = '';   /* 清空 input 以便同张图可重传 */
+      };
+    });
+
+    /* 附件删除 - × 按钮 (阻止冒泡,避免触发 input) */
+    document.querySelectorAll('.rp-attach-remove').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.preventDefault(); e.stopPropagation();
+        var i = parseInt(this.dataset.taskI, 10);
+        var slot = this.dataset.slot;
+        removeAttachment(i, slot);
+      };
+    });
+
+    /* 附件缩略图查看大图 */
+    document.querySelectorAll('.rp-attach-thumb[data-viewer="1"]').forEach(function (img) {
+      img.onclick = function () {
+        openImageViewer(this.src);
+      };
+    });
+
+    /* 添加任务 */
+    var btnAdd = document.getElementById('btnAddTask');
+    if (btnAdd) btnAdd.onclick = function () {
+      form.tasks.push(defaultTask());
+      render();
+      setTimeout(function () {
+        var rows = document.querySelectorAll('.rp-task-row');
+        if (rows.length) rows[rows.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+    };
+
+    var approverInput = document.getElementById('r_approver');
+    if (approverInput) approverInput.oninput = function () { form.approver = approverInput.value; };
+
+    var btnSubmit = document.getElementById('btnSubmit');
+    if (btnSubmit) btnSubmit.onclick = submitForm;
+
+    var btnSaveDraft = document.getElementById('btnSaveDraft');
+    if (btnSaveDraft) btnSaveDraft.onclick = function () { saveForm(); };
+
+    var btnSign = document.getElementById('btnSign');
+    if (btnSign) btnSign.onclick = signForm;
+
+    var btnReject = document.getElementById('btnReject');
+    if (btnReject) btnReject.onclick = rejectForm;
+
+    var btnResubmit = document.getElementById('btnResubmit');
+    if (btnResubmit) btnResubmit.onclick = submitForm;
+
+    var btnDelete = document.getElementById('btnDelete');
+    if (btnDelete) btnDelete.onclick = deleteRecord;
+
+    var btnOpenSign = document.getElementById('btnOpenSign');
+    if (btnOpenSign) btnOpenSign.onclick = function () {
+      if (!form.approver) { toast('请先填写审批人', 'error'); return; }
+      openSignaturePad({
+        onConfirm: function (dataURL) {
+          form.signatureImg = dataURL;
+          toast('签名已记录');
+          form.status = 'signed';
+          saveForm(null, true);
+        }
+      });
+    };
+
+    var btnExport = document.getElementById('btnExportExcel');
+    if (btnExport) btnExport.onclick = function () {
+      var payload = {
+        date: form.date, status: form.status, remarks: form.remarks,
+        categories: form.categories,
+        approver: form.approver, rejected_reason: form.rejected_reason,
+        signature: form.signatureImg,
+        tasks: form.tasks.filter(function (t) { return t.content && t.content.trim(); })
+          .map(function (t) {
+            return Object.assign({}, t, {
+              attachments: {
+                before: (t.attachments && t.attachments.before) || '',
+                during: (t.attachments && t.attachments.during) || '',
+                after:  (t.attachments && t.attachments.after)  || ''
+              }
+            });
+          })
+      };
+      exportReportToExcel(payload);
+    };
+  }
+
+  /* ===== 附件上传 (非必填,处理前/处理中/处理后) ===== */
+  var ATTACH_SLOTS = [
+    { key: 'before', label: '处理前' },
+    { key: 'during', label: '处理中' },
+    { key: 'after',  label: '处理后' }
+  ];
+
+  function attachmentSlotHtml(taskIdx, slot, dataURL) {
+    var filled = !!dataURL;
+    if (filled) {
+      return '<div class="rp-attach-slot filled" data-task-i="' + taskIdx + '" data-slot="' + slot.key + '">' +
+        '<img class="rp-attach-thumb" src="' + dataURL + '" alt="' + slot.label + '" data-viewer="1" />' +
+        '<span class="rp-attach-slot-label">' + slot.label + '</span>' +
+        '<button class="rp-attach-remove" data-task-i="' + taskIdx + '" data-slot="' + slot.key + '" type="button" title="删除" aria-label="删除' + slot.label + '附件">×</button>' +
+      '</div>';
+    }
+    return '<label class="rp-attach-slot empty" data-task-i="' + taskIdx + '" data-slot="' + slot.key + '">' +
+      '<span class="rp-attach-plus">+</span>' +
+      '<span class="rp-attach-slot-label">' + slot.label + '</span>' +
+      '<input type="file" accept="image/*" class="rp-attach-file" data-task-i="' + taskIdx + '" data-slot="' + slot.key + '" />' +
+    '</label>';
+  }
+
+  function renderAttachmentField(taskIdx, t, editable) {
+    var att = (t.attachments && typeof t.attachments === 'object') ? t.attachments : {};
+    var slotsHtml = ATTACH_SLOTS.map(function (s) {
+      return attachmentSlotHtml(taskIdx, s, att[s.key] || '');
+    }).join('');
+    return '<div class="rp-task-field rp-task-attachments">' +
+      '<label class="rp-task-label">工作照片 <span class="rp-task-hint">(选填,可上传处理前 / 处理中 / 处理后)</span></label>' +
+      '<div class="rp-attach-grid' + (editable ? '' : ' readonly') + '">' + slotsHtml + '</div>' +
+    '</div>';
+  }
+
+  /* 把 File 读成 dataURL (单张图最大 4MB,自动 JPEG 压缩到 1200 宽) */
+  function readImageFile(file, onDone, onError) {
+    if (!file || !file.type || file.type.indexOf('image/') !== 0) {
+      if (onError) onError('请选择图片文件'); return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      if (onError) onError('单张照片请控制在 8MB 以内'); return;
+    }
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      var dataURL = ev.target.result;
+      compressImage(dataURL, 1200, function (out) { onDone(out); }, function () { onDone(dataURL); });
+    };
+    reader.onerror = function () { if (onError) onError('读取图片失败'); };
+    reader.readAsDataURL(file);
+  }
+
+  /* canvas 压缩到 maxWidth 内,质量 0.82 */
+  function compressImage(dataURL, maxWidth, onOk, onFail) {
+    var img = new Image();
+    img.onload = function () {
+      try {
+        var w = img.width, h = img.height;
+        if (w <= maxWidth) { onOk(dataURL); return; }
+        var ratio = maxWidth / w;
+        var cw = maxWidth, ch = Math.round(h * ratio);
+        var c = document.createElement('canvas');
+        c.width = cw; c.height = ch;
+        var ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, cw, ch);
+        onOk(c.toDataURL('image/jpeg', 0.82));
+      } catch (e) { onFail(e); }
+    };
+    img.onerror = function () { onFail(new Error('图片解码失败')); };
+    img.src = dataURL;
+  }
+
+  /* 上传单张:更新 model + 局部刷新该槽位 (不重渲整行避免输入失焦) */
+  function updateAttachment(taskIdx, slotKey, dataURL) {
+    if (!form.tasks[taskIdx]) return;
+    if (!form.tasks[taskIdx].attachments) form.tasks[taskIdx].attachments = { before: '', during: '', after: '' };
+    form.tasks[taskIdx].attachments[slotKey] = dataURL;
+    var slot = ATTACH_SLOTS.find(function (s) { return s.key === slotKey; });
+    var wrap = document.querySelector('.rp-attach-slot[data-task-i="' + taskIdx + '"][data-slot="' + slotKey + '"]');
+    if (wrap && slot) {
+      var parent = wrap.parentNode;
+      parent.replaceChild(parseFragment(attachmentSlotHtml(taskIdx, slot, dataURL)), wrap);
+    }
+  }
+
+  function parseFragment(html) {
+    var tmpl = document.createElement('template');
+    tmpl.innerHTML = html.trim();
+    return tmpl.content.firstChild;
+  }
+
+  /* 删除附件 (X 按钮) */
+  function removeAttachment(taskIdx, slotKey) {
+    updateAttachment(taskIdx, slotKey, '');
+    toast('附件已删除');
+  }
+
+  /* 缩略图查看大图 (复用 modal-backdrop,自带关闭按钮 + Esc) */
+  function openImageViewer(src) {
+    if (document.getElementById('rpImgViewer')) document.getElementById('rpImgViewer').remove();
+    var back = document.createElement('div');
+    back.className = 'modal-backdrop rp-img-viewer-back';
+    back.id = 'rpImgViewer';
+    back.innerHTML =
+      '<div class="rp-img-viewer">' +
+        '<button class="rp-img-viewer-close" type="button" aria-label="关闭">×</button>' +
+        '<img src="' + src + '" alt="" />' +
+      '</div>';
+    document.body.appendChild(back);
+    back.onclick = function (e) {
+      if (e.target === back || e.target.classList.contains('rp-img-viewer-close')) {
+        back.remove();
+      }
+    };
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') {
+        back.remove();
+        document.removeEventListener('keydown', escClose);
+      }
+    });
+  }
+
+  /* ===== 实施人员多选(仅显示"班长"/"工人",以勾选方式添加) ===== */
+  var ROLE_DISPLAY = { admin: '管理员', manager: '班长', worker: '工人', viewer: '观察者' };
+  var ROLE_COLOR  = { admin: '#ED4245', manager: '#5865F2', worker: '#35ED7E', viewer: '#7E84A8' };
+  var ROLE_TAG_BG = { admin: 'rgba(237,66,69,.15)', manager: 'rgba(88,101,242,.15)', worker: 'rgba(53,237,126,.15)', viewer: 'rgba(126,132,168,.15)' };
+  /* 实施人员只显示: 班长 (manager) + 工人 (worker) */
+  var TASK_ALLOWED_ROLES = ['manager', 'worker'];
+
+  function openMemberPickerForTask(taskIndex) {
+    var t = form.tasks[taskIndex];
+    var available = members.filter(function (m) {
+      return TASK_ALLOWED_ROLES.indexOf(m.role) >= 0 && t.members.indexOf(m._id) < 0;
+    });
+    if (available.length === 0) {
+      toast('已是全部可分配人员（班长/工人）', 'warn');
+      return;
+    }
+    var items = available.map(function (m) {
+      return {
+        id: m._id,
+        label: m.name,
+        sublabel: ROLE_DISPLAY[m.role] || (ROLE_TEXT[m.role] || ''),
+        role: m.role
+      };
+    });
+    multiSelectDialog(
+      '添加实施人员',
+      '仅显示角色为「班长」或「工人」的人员，勾选后点击确定',
+      items,
+      [],
+      function (ids) {
+        if (!ids || ids.length === 0) return;
+        ids.forEach(function (id) {
+          if (t.members.indexOf(id) < 0) t.members.push(id);
+        });
+        render();
+      }
+    );
+  }
+
+  /* ===== 图标辅助 ===== */
+  function rpIconCheck() {
+    return '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14"><polyline points="20 6 9 17 4 12" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  }
+  function rpIconX() {
+    return '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
+  }
+  function rpIconPlus() {
+    return '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>';
+  }
+  function rpIconTrash() {
+    return '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><polyline points="3 6 5 6 21 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 11v6M14 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  }
+
+  loadForm();
+}
+
+window.initReportPage = initReportPage;
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', initReportPage);
+} else {
+  initReportPage();
+}

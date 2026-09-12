@@ -1,0 +1,40 @@
+# 数据库 / 运行时数据
+*.db
+*.sqlite
+*.sqlite3
+data/
+runtime/
+
+# Server 运行时数据
+server/sessions.json
+server/*.db
+server/data/
+server/runtime/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# Node / npm
+node_modules/
+
+# 系统临时 / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# WorkBuddy 内部缓存（不算源码改动）
+.workbuddy/cache/
+.workbuddy/screenshots/
+
+# 临时检查脚本 (我的 _check_* / _simulate_* / _http_check_*)
+_check_*.js
+_simulate_*.js
+_http_check_*.js
+_smoke_test.js
+_login_test.js
+
+# 日志
+*.log
