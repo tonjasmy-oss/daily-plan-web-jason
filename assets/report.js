@@ -35,8 +35,9 @@ async function initReportPage() {
       endTime: '',
       status: 'done',
       reason: '',
-      /* 附件上传: 处理前/处理中/处理后,非必填。值为 base64 dataURL */
-      attachments: { before: '', during: '', after: '' }
+      /* 附件上传: 数组格式, 最多 6 张, 每项 {filename,url,rel_path,size,uploaded_at,task_idx}
+         服务端落盘到 server/uploads/{date}/{task_idx}/{filename}.jpg, 数据库只存路径 */
+      attachments: []
     };
   }
 
@@ -54,6 +55,20 @@ async function initReportPage() {
       signed_at: '',
       rejected_at: ''
     };
+  }
+
+  /* 兼容旧 base64 格式 {before,during,after} 与新格式 [arr] */
+  function normalizeAttachments(att) {
+    if (!att) return [];
+    if (Array.isArray(att)) return att.filter(function (a) { return a && a.url; });
+    if (typeof att === 'object') {
+      var arr = [];
+      ['before', 'during', 'after'].forEach(function (k) {
+        if (att[k]) arr.push({ filename: 'legacy-' + k, url: att[k], legacy: true });
+      });
+      return arr;
+    }
+    return [];
   }
 
   /* ---------- 数据加载 ---------- */
@@ -78,7 +93,6 @@ async function initReportPage() {
           },
           tasks: (r.tasks && r.tasks.length > 0)
             ? r.tasks.map(function (t) {
-                var att = (t.attachments && typeof t.attachments === 'object') ? t.attachments : {};
                 return {
                   id: t.id || uuid().substring(0, 8),
                   content: t.content || '',
@@ -87,11 +101,8 @@ async function initReportPage() {
                   endTime: t.endTime || '',
                   status: t.status === 'undone' ? 'undone' : 'done',
                   reason: t.reason || '',
-                  attachments: {
-                    before: att.before || '',
-                    during: att.during || '',
-                    after:  att.after  || ''
-                  }
+                  /* 兼容旧 base64 格式 {before,during,after} -> 转为 [{filename:'legacy',url:'data:...'}] */
+                  attachments: normalizeAttachments(t.attachments)
                 };
               })
             : [defaultTask()],
@@ -192,11 +203,10 @@ async function initReportPage() {
       tasks: form.tasks.filter(function (t) { return t.content && t.content.trim(); })
         .map(function (t) {
           return Object.assign({}, t, {
-            attachments: {
-              before: (t.attachments && t.attachments.before) || '',
-              during: (t.attachments && t.attachments.during) || '',
-              after:  (t.attachments && t.attachments.after)  || ''
-            }
+            /* 只保存有效附件 (有 url) - 数组格式 [{filename,url,size,...}] */
+            attachments: Array.isArray(t.attachments)
+              ? t.attachments.filter(function (a) { return a && a.url; })
+              : []
           });
         })
     };
@@ -553,18 +563,14 @@ async function initReportPage() {
       };
     });
 
-    /* 附件上传 - file change */
+    /* 附件上传 - file change (走 /api/uploads, 不区分阶段) */
     document.querySelectorAll('.rp-attach-file').forEach(function (inp) {
       inp.onchange = function () {
         var i = parseInt(this.dataset.taskI, 10);
-        var slot = this.dataset.slot;
-        var file = this.files && this.files[0];
-        if (!file) return;
-        readImageFile(file,
-          function (dataURL) { updateAttachment(i, slot, dataURL); },
-          function (msg) { toast(msg, 'error'); inp.value = ''; }
-        );
-        this.value = '';   /* 清空 input 以便同张图可重传 */
+        var f = this.files && this.files[0];
+        if (!f) return;
+        addAttachment(i, f);
+        this.value = '';
       };
     });
 
@@ -573,8 +579,8 @@ async function initReportPage() {
       btn.onclick = function (e) {
         e.preventDefault(); e.stopPropagation();
         var i = parseInt(this.dataset.taskI, 10);
-        var slot = this.dataset.slot;
-        removeAttachment(i, slot);
+        var idx = parseInt(this.dataset.idx, 10);
+        removeAttachmentByIdx(i, idx);
       };
     });
 
@@ -640,11 +646,9 @@ async function initReportPage() {
         tasks: form.tasks.filter(function (t) { return t.content && t.content.trim(); })
           .map(function (t) {
             return Object.assign({}, t, {
-              attachments: {
-                before: (t.attachments && t.attachments.before) || '',
-                during: (t.attachments && t.attachments.during) || '',
-                after:  (t.attachments && t.attachments.after)  || ''
-              }
+              attachments: Array.isArray(t.attachments)
+                ? t.attachments.filter(function (a) { return a && a.url; })
+                : []
             });
           })
       };
@@ -652,41 +656,50 @@ async function initReportPage() {
     };
   }
 
-  /* ===== 附件上传 (非必填,处理前/处理中/处理后) ===== */
-  var ATTACH_SLOTS = [
-    { key: 'before', label: '处理前' },
-    { key: 'during', label: '处理中' },
-    { key: 'after',  label: '处理后' }
-  ];
+  /* ===== 附件上传 (数组格式, 最多 6 张, 不区分处理前/中/后) ===== */
+  var ATTACH_MAX = 6;
 
-  function attachmentSlotHtml(taskIdx, slot, dataURL) {
-    var filled = !!dataURL;
-    if (filled) {
-      return '<div class="rp-attach-slot filled" data-task-i="' + taskIdx + '" data-slot="' + slot.key + '">' +
-        '<img class="rp-attach-thumb" src="' + dataURL + '" alt="' + slot.label + '" data-viewer="1" />' +
-        '<span class="rp-attach-slot-label">' + slot.label + '</span>' +
-        '<button class="rp-attach-remove" data-task-i="' + taskIdx + '" data-slot="' + slot.key + '" type="button" title="删除" aria-label="删除' + slot.label + '附件">×</button>' +
-      '</div>';
-    }
-    return '<label class="rp-attach-slot empty" data-task-i="' + taskIdx + '" data-slot="' + slot.key + '">' +
+  /* 单张图片项 HTML (有 url 即可显示) */
+  function attachItemHtml(taskIdx, att, idx) {
+    var isLegacy = !!att.legacy;
+    return '<div class="rp-attach-item" data-task-i="' + taskIdx + '" data-idx="' + idx + '" data-rel="' + esc(att.rel_path || '') + '">' +
+      '<img class="rp-attach-thumb" src="' + esc(att.url) + '" alt="工作照片" data-viewer="1" />' +
+      '<div class="rp-attach-meta">' +
+        '<span class="rp-attach-fname" title="' + esc(att.filename) + '">' + esc(att.filename) + '</span>' +
+        '<span class="rp-attach-size">' + formatSize(att.size) + (isLegacy ? ' · 旧格式' : '') + '</span>' +
+      '</div>' +
+      '<button class="rp-attach-remove" data-task-i="' + taskIdx + '" data-idx="' + idx + '" type="button" title="删除">×</button>' +
+    '</div>';
+  }
+
+  /* "+" 槽位 HTML (仅当未达上限时显示) */
+  function attachAddHtml(taskIdx) {
+    return '<label class="rp-attach-add" data-task-i="' + taskIdx + '">' +
       '<span class="rp-attach-plus">+</span>' +
-      '<span class="rp-attach-slot-label">' + slot.label + '</span>' +
-      '<input type="file" accept="image/*" class="rp-attach-file" data-task-i="' + taskIdx + '" data-slot="' + slot.key + '" />' +
+      '<span class="rp-attach-add-label">上传图片</span>' +
+      '<input type="file" accept="image/*" class="rp-attach-file" data-task-i="' + taskIdx + '" />' +
     '</label>';
   }
 
   function renderAttachmentField(taskIdx, t, editable) {
-    var att = (t.attachments && typeof t.attachments === 'object') ? t.attachments : {};
-    var slotsHtml = ATTACH_SLOTS.map(function (s) {
-      return attachmentSlotHtml(taskIdx, s, att[s.key] || '');
-    }).join('');
+    var arr = Array.isArray(t.attachments) ? t.attachments : [];
+    var itemsHtml = arr.map(function (a, i) { return attachItemHtml(taskIdx, a, i); }).join('');
+    var addHtml = (editable && arr.length < ATTACH_MAX) ? attachAddHtml(taskIdx) : '';
+    var countText = arr.length > 0 ? '已上传 ' + arr.length + ' / ' + ATTACH_MAX + ' 张' : '最多 ' + ATTACH_MAX + ' 张';
     return '<div class="rp-task-field rp-task-attachments">' +
-      '<label class="rp-task-label">工作照片 <span class="rp-task-hint">(选填,可上传处理前 / 处理中 / 处理后)</span></label>' +
-      '<div class="rp-attach-grid' + (editable ? '' : ' readonly') + '">' + slotsHtml + '</div>' +
+      '<label class="rp-task-label">工作照片 <span class="rp-task-hint">(' + countText + ', 不区分阶段)</span></label>' +
+      '<div class="rp-attach-grid">' + itemsHtml + addHtml + '</div>' +
     '</div>';
   }
 
-  /* 把 File 读成 dataURL (单张图最大 4MB,自动 JPEG 压缩到 1200 宽) */
+  function formatSize(bytes) {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + 'B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+    return (bytes / 1024 / 1024).toFixed(1) + 'MB';
+  }
+
+  /* 读取 File -> dataURL -> canvas 压缩 (1200px JPEG 0.82) */
   function readImageFile(file, onDone, onError) {
     if (!file || !file.type || file.type.indexOf('image/') !== 0) {
       if (onError) onError('请选择图片文件'); return;
@@ -697,13 +710,13 @@ async function initReportPage() {
     var reader = new FileReader();
     reader.onload = function (ev) {
       var dataURL = ev.target.result;
-      compressImage(dataURL, 1200, function (out) { onDone(out); }, function () { onDone(dataURL); });
+      compressImage(dataURL, 1200, function (out) { onDone(out, file.size); },
+        function () { onDone(dataURL, file.size); });
     };
     reader.onerror = function () { if (onError) onError('读取图片失败'); };
     reader.readAsDataURL(file);
   }
 
-  /* canvas 压缩到 maxWidth 内,质量 0.82 */
   function compressImage(dataURL, maxWidth, onOk, onFail) {
     var img = new Image();
     img.onload = function () {
@@ -723,17 +736,107 @@ async function initReportPage() {
     img.src = dataURL;
   }
 
-  /* 上传单张:更新 model + 局部刷新该槽位 (不重渲整行避免输入失焦) */
-  function updateAttachment(taskIdx, slotKey, dataURL) {
-    if (!form.tasks[taskIdx]) return;
-    if (!form.tasks[taskIdx].attachments) form.tasks[taskIdx].attachments = { before: '', during: '', after: '' };
-    form.tasks[taskIdx].attachments[slotKey] = dataURL;
-    var slot = ATTACH_SLOTS.find(function (s) { return s.key === slotKey; });
-    var wrap = document.querySelector('.rp-attach-slot[data-task-i="' + taskIdx + '"][data-slot="' + slotKey + '"]');
-    if (wrap && slot) {
-      var parent = wrap.parentNode;
-      parent.replaceChild(parseFragment(attachmentSlotHtml(taskIdx, slot, dataURL)), wrap);
+  /* 上传一张图: multipart/form-data -> /api/uploads -> 返回 {url, filename, rel_path, size}
+     更新 form.tasks[taskIdx].attachments 数组, 局部刷新整段 */
+  function addAttachment(taskIdx, file) {
+    var t = form.tasks[taskIdx];
+    if (!t) return;
+    if (!Array.isArray(t.attachments)) t.attachments = [];
+    if (t.attachments.length >= ATTACH_MAX) {
+      toast('最多上传 ' + ATTACH_MAX + ' 张照片', 'warn');
+      return;
     }
+    readImageFile(file,
+      function (dataURL, origSize) {
+        /* 先压缩上传, 用 FormData */
+        var fd = new FormData();
+        /* 关键: 把压缩后的 dataURL 转成 Blob 后 append, 这样服务端拿到的是真实二进制 */
+        dataURLtoBlob(dataURL, function (blob) {
+          fd.append('file', blob, file.name || 'photo.jpg');
+          fd.append('date', form.date || todayStr());
+          fd.append('task_idx', String(taskIdx));
+          fd.append('task_content', (t.content || '').substring(0, 80));
+          fetch('/api/uploads', { method: 'POST', credentials: 'same-origin', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+              if (!res || !res.attachment) { toast('上传失败', 'error'); return; }
+              t.attachments.push(res.attachment);
+              refreshAttachmentField(taskIdx);
+              toast('已上传 ' + (t.attachments.length) + ' / ' + ATTACH_MAX);
+            })
+            .catch(function () { toast('上传失败,请确认服务已启动', 'error'); });
+        });
+      },
+      function (msg) { toast(msg, 'error'); }
+    );
+  }
+
+  /* dataURL -> Blob (用于 FormData 二进制上传) */
+  function dataURLtoBlob(dataURL, onDone) {
+    try {
+      var arr = dataURL.split(',');
+      var mime = (arr[0].match(/:(.*?);/) || [])[1] || 'image/jpeg';
+      var bin = atob(arr[1]);
+      var buf = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      onDone(new Blob([buf], { type: mime }));
+    } catch (e) { onDone(null); }
+  }
+
+  /* 删除一张附件 (DOM 局部刷新) */
+  function removeAttachmentByIdx(taskIdx, idx) {
+    var t = form.tasks[taskIdx];
+    if (!t || !Array.isArray(t.attachments)) return;
+    var att = t.attachments[idx];
+    if (!att) return;
+    var rel = att.rel_path;
+    t.attachments.splice(idx, 1);
+    refreshAttachmentField(taskIdx);
+    toast('附件已删除');
+    /* 异步删文件 */
+    if (rel) {
+      fetch('/api/uploads?path=' + encodeURIComponent(rel), { method: 'DELETE', credentials: 'same-origin' })
+        .catch(function () {});
+    }
+  }
+
+  /* 整段局部刷新附件区 (不重渲整行, 避免输入失焦) */
+  function refreshAttachmentField(taskIdx) {
+    var t = form.tasks[taskIdx];
+    if (!t) return;
+    var row = document.querySelector('.rp-task-row[data-i="' + taskIdx + '"]');
+    if (!row) return;
+    var oldField = row.querySelector('.rp-task-attachments');
+    if (!oldField) return;
+    var editable = canEdit();
+    var newField = parseFragment(renderAttachmentField(taskIdx, t, editable));
+    oldField.parentNode.replaceChild(newField, oldField);
+    /* 重新绑定事件 */
+    rebindAttachmentEvents(taskIdx);
+  }
+
+  function rebindAttachmentEvents(taskIdx) {
+    var field = document.querySelector('.rp-task-row[data-i="' + taskIdx + '"] .rp-task-attachments');
+    if (!field) return;
+    var fileInput = field.querySelector('.rp-attach-file');
+    if (fileInput) {
+      fileInput.onchange = function () {
+        var f = this.files && this.files[0];
+        if (!f) return;
+        addAttachment(taskIdx, f);
+        this.value = '';
+      };
+    }
+    field.querySelectorAll('.rp-attach-remove').forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.preventDefault(); e.stopPropagation();
+        var idx = parseInt(this.dataset.idx, 10);
+        removeAttachmentByIdx(taskIdx, idx);
+      };
+    });
+    field.querySelectorAll('.rp-attach-thumb[data-viewer="1"]').forEach(function (img) {
+      img.onclick = function () { openImageViewer(this.src); };
+    });
   }
 
   function parseFragment(html) {
@@ -742,13 +845,7 @@ async function initReportPage() {
     return tmpl.content.firstChild;
   }
 
-  /* 删除附件 (X 按钮) */
-  function removeAttachment(taskIdx, slotKey) {
-    updateAttachment(taskIdx, slotKey, '');
-    toast('附件已删除');
-  }
-
-  /* 缩略图查看大图 (复用 modal-backdrop,自带关闭按钮 + Esc) */
+  /* 缩略图查看大图 */
   function openImageViewer(src) {
     if (document.getElementById('rpImgViewer')) document.getElementById('rpImgViewer').remove();
     var back = document.createElement('div');

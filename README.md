@@ -107,8 +107,9 @@ daily-plan-web/
 | `departments` | 部门管理（parent_id 树形结构） |
 | `roles` | 角色权限（permissions 数组） |
 | `settings` | 系统参数（KV 表，key 主键） |
+| `server/uploads/{date}/{task_idx}/` | ★ 附件图片文件存储（每日每任务独立目录，文件名含内容哈希） |
 
-清空数据：系统设置 → 「危险操作」→「清空全部数据」(POST `/api/reset`)。
+清空数据：系统设置 → 「危险操作」→「清空全部数据」(POST `/api/reset`，**注意：不删 uploads/ 目录里的图片**，需手动清理)。
 
 ## REST API 一览
 
@@ -132,7 +133,22 @@ daily-plan-web/
 | GET/POST | `/api/roles[/:id]` | 角色 CRUD |
 | GET/POST/DELETE | `/api/settings[/:key]` | 系统参数 KV |
 | POST | `/api/migrate` | **从 localStorage 一键迁移到 SQLite**（首启自动触发） |
+| POST | `/api/uploads` | **附件图片 multipart 上传**（保存到 `server/uploads/{date}/{task_idx}/`，数据库只存路径） |
+| DELETE | `/api/uploads?path=` | 删除上传的图片文件 |
 | GET/POST | `/api/backup` `/api/restore` `/api/reset` | 备份 / 恢复 / 清空（12 类全量） |
+
+## 附件上传 (v3 重构)
+
+- **不区分阶段**：每条任务的附件字段是数组 `attachments: [{filename, url, rel_path, size, uploaded_at}]`，**最多 6 张**
+- **服务端落盘**：上传走 multipart/form-data → `/api/uploads` → 文件存到 `server/uploads/{date}/{task_idx}/{filename}.jpg`
+- **文件命名**：`{YYYY-MM-DD}_{task_idx}_{hash(content)[:6]}_{HHMMSSmmm}.jpg`
+  - 日期：所属日报填报日期
+  - task_idx：所属任务在日报里的序号（0/1/2...）
+  - 内容哈希：任务工作内容前 80 字符的 MD5 前 6 位（同一工作内容上多次传同名前缀，便于检索）
+  - 时间戳：12 位（HHMMSSmmm），防重名覆盖
+- **数据库只存路径**：不再 base64 内嵌，reports.tasks_json 体积大幅缩小
+- **GET 静态**：浏览器访问 `/uploads/{date}/{task_idx}/{filename}` 直接返回图片
+- **兼容旧数据**：从 localStorage 迁来的 `{before,during,after}` 自动转为数组 `[{filename:'legacy-xxx', url:'data:...'}]`，UI 仍可显示
 
 ## 响应式断点
 

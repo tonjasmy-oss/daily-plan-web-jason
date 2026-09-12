@@ -11,6 +11,7 @@
 启动：  python server/app.py  [端口，默认 8080]
 """
 
+import hashlib
 import json
 import os
 import re
@@ -25,6 +26,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_ROOT = os.path.dirname(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, 'data.db')
 SESSION_FILE = os.path.join(BASE_DIR, 'sessions.json')
+UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')  # 附件图片存放根目录
 COOKIE_NAME = 'engms_session'
 
 _lock = threading.Lock()
@@ -868,6 +870,77 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _multipart(self):
+        """手写 multipart/form-data 解析 (Python 3.13 移除了 cgi 模块)
+        返回 {fields:{}, files:{}, error:str}
+        - 限制总大小 50MB, 单文件 8MB
+        - 字段名按 boundary 切, 解析 Content-Disposition 拿 filename
+        """
+        try:
+            ctype = self.headers.get('Content-Type', '')
+            if 'multipart/form-data' not in ctype:
+                return {'fields': {}, 'files': {}, 'error': '不是 multipart'}
+            # 提取 boundary
+            import re as _re
+            m = _re.search(r'boundary=(?:"([^"]+)"|([^;\s]+))', ctype)
+            if not m:
+                return {'fields': {}, 'files': {}, 'error': '缺少 boundary'}
+            boundary = '--' + (m.group(1) or m.group(2))
+            n = int(self.headers.get('Content-Length') or 0)
+            if n <= 0:
+                return {'fields': {}, 'files': {}, 'error': '空 body'}
+            if n > 50 * 1024 * 1024:
+                return {'fields': {}, 'files': {}, 'error': '总大小超 50MB'}
+            raw = self.rfile.read(n)
+            fields, files = {}, {}
+            # 切分各 part
+            parts = raw.split(boundary.encode('utf-8'))
+            for part in parts[1:-1]:  # 跳过首尾空段
+                if not part or part.strip() == b'':
+                    continue
+                # 切 headers 与 body
+                sep = b'\r\n\r\n'
+                idx = part.find(sep)
+                if idx < 0:
+                    continue
+                head_raw = part[:idx].decode('utf-8', errors='ignore')
+                body = part[idx + 4:]
+                # 去掉尾部 \r\n
+                if body.endswith(b'\r\n'):
+                    body = body[:-2]
+                # 解析 Content-Disposition
+                cd_m = _re.search(r'Content-Disposition:\s*form-data;\s*(.*?)(?:\r\n\r\n|$)', head_raw, _re.DOTALL | _re.IGNORECASE)
+                if not cd_m:
+                    continue
+                cd = cd_m.group(1)
+                name_m = _re.search(r'name="([^"]+)"', cd)
+                if not name_m:
+                    continue
+                name = name_m.group(1)
+                file_m = _re.search(r'filename="([^"]*)"', cd)
+                if file_m and file_m.group(1):
+                    filename = file_m.group(1)
+                    ctype_m = _re.search(r'Content-Type:\s*([^\r\n]+)', head_raw, _re.IGNORECASE)
+                    ftype = (ctype_m.group(1).strip() if ctype_m else 'application/octet-stream')
+                    if len(body) > 8 * 1024 * 1024:
+                        return {'fields': {}, 'files': {}, 'error': '单文件超 8MB'}
+                    files[name] = {'filename': filename, 'content': body, 'type': ftype}
+                else:
+                    fields[name] = body.decode('utf-8', errors='replace')
+            return {'fields': fields, 'files': files}
+        except Exception as e:
+            return {'fields': {}, 'files': {}, 'error': str(e)}
+
+    def _delete_file(self, rel_path):
+        """删除 uploads/{rel} 路径下的文件, 防止越权"""
+        if not rel_path: return False
+        full = os.path.normpath(os.path.join(UPLOAD_DIR, rel_path))
+        if not full.startswith(UPLOAD_DIR): return False
+        if os.path.isfile(full):
+            try: os.remove(full); return True
+            except Exception: return False
+        return False
+
     def log_message(self, fmt, *args):
         pass  # 静默访问日志
 
@@ -909,21 +982,25 @@ class Handler(BaseHTTPRequestHandler):
     def serve_static(self, path):
         if path in ('/', ''):
             path = '/index.html'
-        fp = os.path.normpath(os.path.join(WEB_ROOT, path.lstrip('/')))
-        if not fp.startswith(WEB_ROOT):
-            self._error('Forbidden', 403)
-            return
+        # uploads 目录走专门路径(URL 形如 /uploads/2026-09-15/t1/abc.jpg)
+        if path.startswith('/uploads/'):
+            rel = path[len('/uploads/'):].lstrip('/')
+            fp = os.path.normpath(os.path.join(UPLOAD_DIR, rel))
+            if not fp.startswith(UPLOAD_DIR):
+                self._error('Forbidden', 403); return
+        else:
+            fp = os.path.normpath(os.path.join(WEB_ROOT, path.lstrip('/')))
+            if not fp.startswith(WEB_ROOT):
+                self._error('Forbidden', 403); return
         if not os.path.isfile(fp):
-            self._error('Not Found', 404)
-            return
+            self._error('Not Found', 404); return
         ext = os.path.splitext(fp)[1].lower()
         ctype = MIME.get(ext, 'application/octet-stream')
         try:
             with open(fp, 'rb') as f:
                 data = f.read()
         except Exception:
-            self._error('Read Error', 500)
-            return
+            self._error('Read Error', 500); return
         self.send_response(200)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(data)))
@@ -933,8 +1010,34 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- API ----------
     def route_api(self, method, path, qs):
-        body = self._body() if method in ('POST', 'PUT') else {}
+        ctype = self.headers.get('Content-Type', '') or ''
+        is_multipart = 'multipart/form-data' in ctype
+        body = self._body() if (method in ('POST', 'PUT') and not is_multipart) else {}
         uid = current_user_id(self)
+
+        # ---- 附件上传 (multipart) ----
+        if path == '/api/uploads' and method == 'POST' and is_multipart:
+            try:
+                self.handle_upload(uid)
+            except BrokenPipeError:
+                pass
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                try: self._error('上传失败: %s' % e, 500)
+                except Exception: pass
+            return
+
+        # ---- 附件删除 ----
+        if path == '/api/uploads' and method == 'DELETE':
+            try:
+                self.handle_upload_delete(uid, qs)
+            except BrokenPipeError:
+                pass
+            except Exception as e:
+                try: self._error('删除失败: %s' % e, 500)
+                except Exception: pass
+            return
+
         try:
             self.handle_api(method, path, qs, body, uid)
         except BrokenPipeError:
@@ -946,6 +1049,70 @@ class Handler(BaseHTTPRequestHandler):
                 self._error('服务器错误: %s' % e, 500)
             except Exception:
                 pass
+
+    def handle_upload(self, uid):
+        if not uid:
+            self._error('未登录', 401); return
+        mp = self._multipart()
+        if mp.get('error'):
+            self._error('multipart 解析失败: ' + mp['error'], 400); return
+        f = mp['files'].get('file')
+        if not f:
+            self._error('缺少 file 字段', 400); return
+        if 'image/' not in (f['type'] or ''):
+            self._error('只支持图片文件', 400); return
+
+        date = (mp['fields'].get('date') or today_str()).strip()
+        task_idx = (mp['fields'].get('task_idx') or '0').strip()
+        task_content = (mp['fields'].get('task_content') or '').strip()
+
+        # 校验日期 + task_idx 防止路径越权
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+            self._error('date 格式错误', 400); return
+        if not re.match(r'^\d{1,3}$', task_idx):
+            self._error('task_idx 格式错误', 400); return
+
+        # 文件名: {date}_{task_idx}_{hash(content)}_{ts}.jpg
+        content_hash = hashlib.md5(task_content.encode('utf-8')).hexdigest()[:6] if task_content else 'nohash'
+        ts = datetime.now().strftime('%H%M%S%f')[:12]
+        filename = '{}_{}_{}_{}.jpg'.format(date, task_idx, content_hash, ts)
+
+        rel_dir = os.path.join(date, task_idx)
+        full_dir = os.path.join(UPLOAD_DIR, rel_dir)
+        os.makedirs(full_dir, exist_ok=True)
+        full_path = os.path.join(full_dir, filename)
+
+        try:
+            with open(full_path, 'wb') as f_out:
+                f_out.write(f['content'])
+        except Exception as e:
+            self._error('写文件失败: %s' % e, 500); return
+
+        size = len(f['content'])
+        rel_path = '{}/{}/{}'.format(date, task_idx, filename)
+        url = '/uploads/' + rel_path
+        self._json({
+            'ok': True,
+            'attachment': {
+                'filename': filename,
+                'url': url,
+                'rel_path': rel_path,
+                'size': size,
+                'uploaded_at': now_iso(),
+                'task_idx': int(task_idx),
+            }
+        })
+
+    def handle_upload_delete(self, uid, qs):
+        if not uid:
+            self._error('未登录', 401); return
+        rel = (qs.get('path') or [''])[0]
+        if not rel:
+            self._error('缺少 path 参数', 400); return
+        if self._delete_file(rel):
+            self._json({'ok': True})
+        else:
+            self._error('文件不存在或删除失败', 404)
 
     def handle_api(self, method, path, qs, body, uid):
         conn = get_db()
