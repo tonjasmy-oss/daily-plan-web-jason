@@ -12,22 +12,46 @@
 """
 
 import hashlib
+import io
 import json
 import os
 import re
 import sqlite3
 import threading
 import uuid as _uuid
+import zipfile
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, parse_qs, unquote, quote
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_ROOT = os.path.dirname(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, 'data.db')
 SESSION_FILE = os.path.join(BASE_DIR, 'sessions.json')
-UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')  # 附件图片存放根目录
+DEFAULT_UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')  # 默认附件目录
 COOKIE_NAME = 'engms_session'
+
+
+def get_upload_dir():
+    """动态读取 settings KV 中 system.upload_path, 未配置则用默认"""
+    try:
+        conn = get_db()
+        r = conn.execute("SELECT value_json FROM settings WHERE key='system'").fetchone()
+        conn.close()
+        if r:
+            obj = json.loads(r['value_json'] or '{}')
+            p = obj.get('upload_path')
+            if p and isinstance(p, str):
+                if not os.path.isabs(p):
+                    p = os.path.join(BASE_DIR, p)
+                return os.path.normpath(p)
+    except Exception:
+        pass
+    return DEFAULT_UPLOAD_DIR
+
+# 兼容旧引用: UPLOAD_DIR 在运行时动态调用 get_upload_dir() 获取
+def UPLOAD_DIR():
+    return get_upload_dir()
 
 _lock = threading.Lock()
 
@@ -934,8 +958,9 @@ class Handler(BaseHTTPRequestHandler):
     def _delete_file(self, rel_path):
         """删除 uploads/{rel} 路径下的文件, 防止越权"""
         if not rel_path: return False
-        full = os.path.normpath(os.path.join(UPLOAD_DIR, rel_path))
-        if not full.startswith(UPLOAD_DIR): return False
+        upload_dir = get_upload_dir()
+        full = os.path.normpath(os.path.join(upload_dir, rel_path))
+        if not (full == upload_dir or full.startswith(upload_dir + os.sep)): return False
         if os.path.isfile(full):
             try: os.remove(full); return True
             except Exception: return False
@@ -985,8 +1010,9 @@ class Handler(BaseHTTPRequestHandler):
         # uploads 目录走专门路径(URL 形如 /uploads/2026-09-15/t1/abc.jpg)
         if path.startswith('/uploads/'):
             rel = path[len('/uploads/'):].lstrip('/')
-            fp = os.path.normpath(os.path.join(UPLOAD_DIR, rel))
-            if not fp.startswith(UPLOAD_DIR):
+            upload_dir = get_upload_dir()
+            fp = os.path.normpath(os.path.join(upload_dir, rel))
+            if not (fp == upload_dir or fp.startswith(upload_dir + os.sep)):
                 self._error('Forbidden', 403); return
         else:
             fp = os.path.normpath(os.path.join(WEB_ROOT, path.lstrip('/')))
@@ -1038,6 +1064,32 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception: pass
             return
 
+        # ---- 文件管理: 列表 / 单下载 / ZIP批量 ----
+        if path == '/api/files' and method == 'GET':
+            try:
+                self.handle_files_list(uid, qs)
+            except BrokenPipeError: pass
+            except Exception as e:
+                try: self._error('列目录失败: %s' % e, 500)
+                except Exception: pass
+            return
+        if path == '/api/files/download' and method == 'GET':
+            try:
+                self.handle_file_download(uid, qs)
+            except BrokenPipeError: pass
+            except Exception as e:
+                try: self._error('下载失败: %s' % e, 500)
+                except Exception: pass
+            return
+        if path == '/api/files/zip' and method == 'POST':
+            try:
+                self.handle_files_zip(uid, body)
+            except BrokenPipeError: pass
+            except Exception as e:
+                try: self._error('打包失败: %s' % e, 500)
+                except Exception: pass
+            return
+
         try:
             self.handle_api(method, path, qs, body, uid)
         except BrokenPipeError:
@@ -1078,7 +1130,8 @@ class Handler(BaseHTTPRequestHandler):
         filename = '{}_{}_{}_{}.jpg'.format(date, task_idx, content_hash, ts)
 
         rel_dir = os.path.join(date, task_idx)
-        full_dir = os.path.join(UPLOAD_DIR, rel_dir)
+        upload_dir = get_upload_dir()
+        full_dir = os.path.join(upload_dir, rel_dir)
         os.makedirs(full_dir, exist_ok=True)
         full_path = os.path.join(full_dir, filename)
 
@@ -1113,6 +1166,159 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'ok': True})
         else:
             self._error('文件不存在或删除失败', 404)
+
+    # ---------- 文件管理: 列表 / 单下载 / ZIP ----------
+
+    def _safe_resolve(self, rel):
+        """把相对路径解析成绝对路径, 防止越权"""
+        upload_dir = get_upload_dir()
+        if not rel:
+            return upload_dir
+        if os.path.isabs(rel):
+            return None  # 绝对路径不安全
+        full = os.path.normpath(os.path.join(upload_dir, rel))
+        if not (full == upload_dir or full.startswith(upload_dir + os.sep)):
+            return None
+        return full
+
+    def _is_admin(self, uid):
+        """判断当前会话用户是否管理员(文件管理属管理员功能)"""
+        if not uid:
+            return False
+        try:
+            conn = get_db()
+            r = conn.execute('SELECT role FROM members WHERE id=?', (uid,)).fetchone()
+            conn.close()
+            return bool(r and r['role'] == 'admin')
+        except Exception:
+            return False
+
+    def _require_admin(self, uid):
+        """未登录返回 401, 已登录非管理员返回 403"""
+        if not uid:
+            self._error('未登录', 401); return False
+        if not self._is_admin(uid):
+            self._error('需要管理员权限', 403); return False
+        return True
+
+    def handle_files_list(self, uid, qs):
+        if not self._require_admin(uid):
+            return
+        rel = (qs.get('path') or [''])[0]
+        full = self._safe_resolve(rel)
+        if not full:
+            self._error('非法路径', 400); return
+        upload_dir = get_upload_dir()
+        upload_disp = upload_dir.replace(os.sep, '/')
+        cur_rel = rel.replace('\\', '/').strip('/')
+        if cur_rel == '.':
+            cur_rel = ''
+        if not os.path.isdir(full):
+            # 目录尚未创建(例如刚在系统参数里改了保存路径) -> 返回空列表而非 404
+            self._json({
+                'current': cur_rel, 'upload_dir': upload_disp, 'exists': False,
+                'total': 0, 'dirs': 0, 'files': 0, 'items': [],
+            })
+            return
+        items = []
+        for name in sorted(os.listdir(full)):
+            fp = os.path.join(full, name)
+            rel_path = os.path.relpath(fp, upload_dir).replace(os.sep, '/')
+            stat = os.stat(fp)
+            is_dir = os.path.isdir(fp)
+            item = {
+                'name': name,
+                'path': rel_path,
+                'is_dir': is_dir,
+                'size': stat.st_size if not is_dir else 0,
+                'mtime': datetime.fromtimestamp(stat.st_mtime).isoformat(timespec='seconds'),
+            }
+            if not is_dir:
+                ext = os.path.splitext(name)[1].lower()
+                item['is_image'] = ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg')
+                item['url'] = '/uploads/' + rel_path
+                item['ext'] = ext
+            items.append(item)
+        # 排序: 目录在前
+        items.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+        self._json({
+            'current': cur_rel,
+            'upload_dir': upload_disp,
+            'exists': True,
+            'total': len(items),
+            'dirs': sum(1 for x in items if x['is_dir']),
+            'files': sum(1 for x in items if not x['is_dir']),
+            'items': items,
+        })
+
+    def handle_file_download(self, uid, qs):
+        if not self._require_admin(uid):
+            return
+        rel = (qs.get('path') or [''])[0]
+        if not rel:
+            self._error('缺少 path 参数', 400); return
+        full = self._safe_resolve(rel)
+        if not full or not os.path.isfile(full):
+            self._error('文件不存在', 404); return
+        try:
+            with open(full, 'rb') as f:
+                data = f.read()
+        except Exception as e:
+            self._error('读取失败: %s' % e, 500); return
+        ext = os.path.splitext(full)[1].lower()
+        ctype = MIME.get(ext, 'application/octet-stream')
+        filename = os.path.basename(full)
+        # 处理中文文件名
+        filename_enc = quote(filename)
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + filename_enc)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def handle_files_zip(self, uid, body):
+        if not self._require_admin(uid):
+            return
+        paths = (body or {}).get('paths') or []
+        if not isinstance(paths, list) or len(paths) == 0:
+            self._error('缺少 paths 数组', 400); return
+        if len(paths) > 500:
+            self._error('最多批量下载 500 张', 400); return
+        upload_dir = get_upload_dir()
+        # 把所有路径 resolve, 收集有效文件
+        files = []
+        for p in paths:
+            full = self._safe_resolve(p)
+            if full and os.path.isfile(full):
+                rel = os.path.relpath(full, upload_dir).replace(os.sep, '/')
+                files.append((full, rel))
+        if not files:
+            self._error('没有有效文件', 400); return
+        # 流式打包 (避免一次性塞内存)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            # 处理重名: 同名加序号
+            seen = {}
+            for full, rel in files:
+                base = rel
+                if base in seen:
+                    seen[base] += 1
+                    p = os.path.splitext(base)
+                    base = p[0] + '_' + str(seen[base]) + p[1]
+                else:
+                    seen[base] = 1
+                zf.write(full, base)
+        data = buf.getvalue()
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = 'engms_attachments_' + ts + '.zip'
+        filename_enc = quote(filename)
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/zip')
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + filename_enc)
+        self.end_headers()
+        self.wfile.write(data)
 
     def handle_api(self, method, path, qs, body, uid):
         conn = get_db()

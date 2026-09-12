@@ -71,7 +71,8 @@ daily-plan-web/
 ├── members.html           # 人员管理
 ├── departments.html       # 部门管理
 ├── roles.html             # 角色权限
-├── settings.html          # 系统参数
+├── settings.html          # 系统参数（含附件保存路径配置）
+├── settings-files.html    # ★ 附件管理（目录浏览 / 预览 / 单张·批量下载）
 ├── about.html             # 关于我们
 ├── me.html                # 个人中心
 ├── server/
@@ -88,6 +89,7 @@ daily-plan-web/
     ├── signature-pad.js   # Canvas 签名板（鼠标 + 触摸）
     ├── export-excel.js    # ★ Excel 导出（日报 + 日计划）
     ├── xlsx.full.min.js   # SheetJS 库
+    ├── settings-files.js  # ★ 附件管理（面包屑 / 缩略图网格 / 预览灯箱 / ZIP）
     └── …（各页面 JS）
 ```
 
@@ -135,6 +137,9 @@ daily-plan-web/
 | POST | `/api/migrate` | **从 localStorage 一键迁移到 SQLite**（首启自动触发） |
 | POST | `/api/uploads` | **附件图片 multipart 上传**（保存到 `server/uploads/{date}/{task_idx}/`，数据库只存路径） |
 | DELETE | `/api/uploads?path=` | 删除上传的图片文件 |
+| GET | `/api/files?path=` | **附件目录列表**（仅管理员，返回条目 + 存储根路径） |
+| GET | `/api/files/download?path=` | **单张附件下载**（仅管理员，attachment 响应头） |
+| POST | `/api/files/zip` | **批量打包下载 ZIP**（仅管理员，body `{paths:[…]}`，上限 500） |
 | GET/POST | `/api/backup` `/api/restore` `/api/reset` | 备份 / 恢复 / 清空（12 类全量） |
 
 ## 附件上传 (v3 重构)
@@ -149,6 +154,16 @@ daily-plan-web/
 - **数据库只存路径**：不再 base64 内嵌，reports.tasks_json 体积大幅缩小
 - **GET 静态**：浏览器访问 `/uploads/{date}/{task_idx}/{filename}` 直接返回图片
 - **兼容旧数据**：从 localStorage 迁来的 `{before,during,after}` 自动转为数组 `[{filename:'legacy-xxx', url:'data:...'}]`，UI 仍可显示
+
+## 附件存储路径与附件管理 (v4)
+
+- **可配置存储路径**：系统参数 → 「附件存储」→「附件保存路径」，持久化在 `settings` 表 `system.upload_path`
+  - 留空 = 默认 `server/uploads`；相对路径以 `server/` 为基准（如 `uploads`）；也支持绝对路径（如 `D:\engms\uploads`）
+  - 保存后**立即生效**（后端每次读写都动态解析该配置），新上传的附件进入新目录
+- **附件管理页**（侧栏「系统设置 → 附件管理」，仅管理员）
+  - 目录面包屑导航 + 图片缩略图网格，点击缩略图灯箱预览
+  - 单张下载；勾选多张后一键打包 ZIP（保留 `{date}/{task_idx}/` 原始层级）
+- **安全**：三个文件接口均要求管理员会话（未登录 401 / 非管理员 403）；路径解析统一做越权校验，绝对路径、`..` 回溯、兄弟目录前缀绕过均被拒绝，只能访问存储根目录之内
 
 ## 响应式断点
 

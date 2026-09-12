@@ -2879,3 +2879,156 @@ table.data-table {
   .form-grid-2 { grid-template-columns: 1fr; }
 }
 
+/* ============================================================
+ * 幽灵按钮 (btn-ghost) —— 全站多处引用, 补上基类以免裸样式
+ * ============================================================ */
+.btn-ghost {
+  height: 38px; padding: 0 16px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: transparent; color: var(--text-secondary);
+  font-weight: 500; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; transition: all .15s; user-select: none; white-space: nowrap;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--bg-card-hover); border-color: var(--border-light); color: var(--text);
+}
+.btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-ghost svg { width: 16px; height: 16px; }
+.btn-ghost.btn-sm { height: 30px; padding: 0 12px; font-size: 12px; border-radius: var(--radius-sm); }
+
+/* ============================================================
+ * 附件管理 (fm-*) —— 路径面包屑 + 缩略图网格 + 预览灯箱
+ * ============================================================ */
+.fm-pathbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; margin-bottom: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.fm-crumbs {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 13px; min-width: 0;
+}
+.fm-crumbs .sep { color: var(--text-disabled); }
+.fm-crumb { color: var(--text-secondary); }
+.fm-crumb:hover { color: var(--primary-light); }
+.fm-bar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fm-count {
+  font-size: 13px; color: var(--text-muted);
+  font-family: var(--font-num, inherit); font-variant-numeric: tabular-nums;
+}
+.fm-root-hint {
+  font-size: 12px; color: var(--text-disabled);
+  margin-bottom: 14px; word-break: break-all;
+}
+
+.fm-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 16px;
+}
+.fm-grid .loading, .fm-grid .empty-state { grid-column: 1 / -1; }
+
+.fm-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); cursor: pointer;
+  transition: transform .15s, border-color .15s, box-shadow .15s;
+}
+.fm-card:hover {
+  border-color: var(--border-light);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.fm-card.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-bg);
+}
+
+.fm-thumb {
+  aspect-ratio: 4 / 3; width: 100%;
+  background: var(--bg-elevated);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.fm-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fm-thumb-dir { color: var(--primary-light); }
+.fm-thumb-dir svg { width: 46px; height: 46px; opacity: .85; }
+.fm-thumb-file {
+  color: var(--text-muted); font-weight: 700; font-size: 14px;
+  letter-spacing: .5px; font-family: var(--font-num, inherit);
+}
+
+.fm-meta { padding: 10px 12px; min-width: 0; }
+.fm-name {
+  font-size: 13px; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fm-sub {
+  font-size: 11px; color: var(--text-muted); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.fm-check {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  width: 20px; height: 20px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 13, 58, .7); border: 1px solid var(--border-light);
+  color: transparent; transition: all .12s;
+}
+.fm-check:hover { border-color: var(--primary-light); }
+.fm-card.is-selected .fm-check {
+  background: var(--primary); border-color: var(--primary); color: #fff;
+}
+
+.fm-dl {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  width: 26px; height: 26px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 13, 58, .72); border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  opacity: 0; transition: opacity .15s, color .15s, border-color .15s;
+}
+.fm-card:hover .fm-dl { opacity: 1; }
+.fm-dl:hover { color: var(--primary-light); border-color: var(--primary-light); }
+@media (hover: none) { .fm-dl { opacity: 1; } }
+
+/* 图片预览灯箱 */
+.fm-lightbox {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: rgba(5, 7, 25, .86);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.fm-lb-inner {
+  display: flex; flex-direction: column;
+  max-width: 92vw; max-height: 92vh;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-xl); overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+.fm-lb-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 10px 14px; border-bottom: 1px solid var(--divider);
+}
+.fm-lb-name {
+  font-size: 13px; color: var(--text-secondary); min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fm-lb-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.fm-lightbox img {
+  display: block; max-width: 88vw; max-height: calc(92vh - 58px);
+  object-fit: contain; background: #05071A;
+}
+
+@media (max-width: 640px) {
+  .fm-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+  .fm-pathbar { padding: 10px 12px; }
+  .fm-count { width: 100%; }
+}
+
+

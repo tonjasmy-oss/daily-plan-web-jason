@@ -644,6 +644,60 @@ function setSetting(key, value) {
   _syncNow('POST', '/api/settings', { key: key, value: value });
 }
 
+/* ============================================================
+ * 附件文件管理 (仅管理员) —— 系统参数里可配置存储路径
+ * ============================================================ */
+/* 列出某相对路径下的文件/子目录(相对附件根目录) */
+function listFiles(path) {
+  var q = path ? ('?path=' + encodeURIComponent(path)) : '';
+  return fetch('/api/files' + q, { credentials: 'same-origin' }).then(function (r) {
+    if (r.status === 401) { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); location.href = 'login.html'; throw new Error('未登录'); }
+    if (r.status === 403) throw new Error('需要管理员权限');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+/* 单张下载直链(交给浏览器处理 disposition) */
+function downloadFileUrl(path) {
+  return '/api/files/download?path=' + encodeURIComponent(path);
+}
+/* 批量下载: 返回 zip Blob */
+function downloadZip(paths) {
+  return fetch('/api/files/zip', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: paths || [] })
+  }).then(function (r) {
+    if (r.status === 401) { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); location.href = 'login.html'; throw new Error('未登录'); }
+    if (r.status === 403) throw new Error('需要管理员权限');
+    if (!r.ok) throw new Error('打包失败 HTTP ' + r.status);
+    return r.blob();
+  });
+}
+/* 触发浏览器下载一个 Blob */
+function saveBlob(blob, filename) {
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+}
+/* 触发浏览器下载一个 URL */
+function saveUrl(url, filename) {
+  var a = document.createElement('a');
+  a.href = url;
+  if (filename) a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+/* 人类可读字节 */
+function formatBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+  return (n / 1073741824).toFixed(2) + ' GB';
+}
+
 /* ===== 一键迁移 localStorage -> 服务端 ===== */
 function migrateLocalStorageToServer() {
   var payload = {};

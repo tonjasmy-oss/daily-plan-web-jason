@@ -19,6 +19,9 @@ async function initSettingsPage() {
     purchasePerm: true
   }, getSetting('general', {}));
 
+  /* 附件存储路径单独存于 settings.system (后端 get_upload_dir 读取) */
+  var sysConf = Object.assign({ upload_path: '' }, getSetting('system', {}));
+
   var content = renderPage({
     active: 'settings',
     pageHtml:
@@ -36,6 +39,17 @@ async function initSettingsPage() {
       '<div class="section"><h3>系统行为</h3><div class="form-grid">' +
       toggle('自动备份数据', '启用后每周日凌晨自动备份 SQLite 数据库', s.autoBackup) +
       toggle('物资申购需要审批', '启用后,所有物资申购必须经审批通过才能入库', s.purchasePerm) +
+      '</div></div>' +
+      '<div class="section"><h3>附件存储</h3><div class="form-grid">' +
+      field('附件保存路径', 'stUploadPath', sysConf.upload_path, 'text') +
+      '<div class="field-row" style="grid-column:1/-1"><label class="field-label">路径说明</label>' +
+      '<div class="muted" style="font-size:13px;line-height:1.7">' +
+      '留空则使用默认目录 <code>server/uploads</code>。填写相对路径时以服务端 <code>server</code> 目录为基准（如 <code>uploads</code>），也可直接填写绝对路径（如 <code>D:\\engms\\uploads</code>）。保存后立即生效，新上传的附件将保存到该目录。' +
+      '</div></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px">' +
+      '<button class="btn-ghost" id="stOpenFiles">打开附件管理</button>' +
+      '<button class="btn-ghost" id="stReloadPath">测试连接</button>' +
       '</div></div>' +
       '<div class="section"><h3>危险操作</h3><div style="display:flex;gap:12px;flex-wrap:wrap">' +
       '<button class="btn-ghost" id="stExport">导出全部数据 (服务端)</button>' +
@@ -67,8 +81,28 @@ async function initSettingsPage() {
       autoBackup: document.querySelector('[data-toggle]').checked,
       purchasePerm: document.querySelectorAll('[data-toggle]')[1].checked,
     };
+    var uploadPath = (document.getElementById('stUploadPath').value || '').trim();
     setSetting('general', payload);  /* 走 /api/settings */
+    setSetting('system', { upload_path: uploadPath });  /* 附件路径: 后端 get_upload_dir 读取 */
     toast('设置已保存', 'success');
+  });
+
+  /* 打开附件管理页 */
+  document.getElementById('stOpenFiles').addEventListener('click', function () {
+    location.href = 'settings-files.html';
+  });
+
+  /* 测试连接 - 先保存路径, 再尝试列出该目录 */
+  document.getElementById('stReloadPath').addEventListener('click', function () {
+    var uploadPath = (document.getElementById('stUploadPath').value || '').trim();
+    setSetting('system', { upload_path: uploadPath });
+    setTimeout(function () {
+      listFiles('').then(function (res) {
+        toast('连接正常, 共 ' + res.total + ' 个条目', 'success');
+      }).catch(function (e) {
+        toast('无法访问: ' + (e.message || '未知错误'), 'error');
+      });
+    }, 500);  /* 等设置写库后再列目录 */
   });
 
   /* 导出 - 直接请求服务端 /api/backup 拿到全量 JSON */
