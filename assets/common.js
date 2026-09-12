@@ -781,6 +781,51 @@ function daysBetween(d1, d2) {
   return Math.round((d2 - d1) / 86400000);
 }
 
+/* 'YYYY-MM-DD' -> 'YYYY年M月D日' (非法输入原样返回) */
+function cnDateText(s) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '');
+  if (!m) return s || '';
+  return m[1] + '年' + parseInt(m[2], 10) + '月' + parseInt(m[3], 10) + '日';
+}
+
+/* 日期加减天数 -> 'YYYY-MM-DD' */
+function addDaysStr(dateStr, n) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || '');
+  if (!m) return '';
+  var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  d.setDate(d.getDate() + Number(n || 0));
+  return formatDateStr(d);
+}
+
+/* 自然周(周一~周日) */
+function getWeekRange(d) {
+  d = d || new Date();
+  var dt = new Date(d);
+  var day = (dt.getDay() + 6) % 7;
+  var mon = new Date(dt); mon.setDate(dt.getDate() - day);
+  var sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  return { start: formatDateStr(mon), end: formatDateStr(sun) };
+}
+
+/* 日报表的"计划日期": 优先取计划工作日期, 旧记录回落到填报日期 */
+function reportPlanDate(rec) {
+  if (!rec) return '';
+  return rec.plan_date || rec.date || '';
+}
+
+/* 日报表标题
+ *   审批通过(signed) -> 「{计划工作日期}年M月D日 计划工作完成情况 / 日常维修完成情况」
+ *   其它状态         -> 「{计划日期} 日报表」
+ * 类别取该记录勾选的标题分类(计划工作优先), 未分类时按「计划工作」处理 */
+function reportDisplayTitle(rec) {
+  if (!rec) return '';
+  var pd = reportPlanDate(rec);
+  var cats = rec.categories || {};
+  var kind = cats.plan || !cats.repair ? '计划工作' : '日常维修';
+  if (rec.status === 'signed' && pd) return cnDateText(pd) + kind + '完成情况';
+  return pd ? (pd + ' 日报表') : '日报表';
+}
+
 /* ===== HTML 转义 ===== */
 function esc(str) {
   if (str == null) return '';

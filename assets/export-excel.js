@@ -30,9 +30,10 @@ function exportReportToExcel(report, onDone) {
     return;
   }
   var wsData = [];
-  wsData.push(['工程工作安排表']);
+  wsData.push([reportDisplayTitle(report)]);
   wsData.push(['']);
-  wsData.push(['日期', report.date || '']);
+  wsData.push(['填报日期', report.date || '']);
+  wsData.push(['计划工作日期', report.plan_date || report.date || '']);
   wsData.push(['状态', REPORT_STATUS_TEXT[report.status] || report.status || '未知']);
   wsData.push(['备注', report.remarks || '']);
   wsData.push(['审批人', report.approver || '']);
@@ -81,7 +82,8 @@ function exportReportToExcel(report, onDone) {
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url;
-  a.download = '工作安排表_' + (report.date || formatDateStr(new Date())) + '.xlsx';
+  /* 文件名使用「计划日期」而非填报日期 */
+  a.download = '日报表_' + (report.plan_date || report.date || formatDateStr(new Date())) + '.xlsx';
   a.click();
   URL.revokeObjectURL(url);
   toast('Excel 已导出');
@@ -191,7 +193,8 @@ function exportDailyPlanToExcel(plan, members, onDone) {
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url;
-  a.download = '日计划工作安排_' + (plan.date || formatDateStr(new Date())) + '.xlsx';
+  /* 文件名使用「计划日期」而非填报日期 */
+  a.download = '日计划工作安排_' + (plan.plan_date || plan.date || formatDateStr(new Date())) + '.xlsx';
   a.click();
   URL.revokeObjectURL(url);
   toast('Excel 已导出');

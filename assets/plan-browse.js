@@ -1,5 +1,5 @@
 /* ============================================================
- * 计划浏览 — 日计划 / 周计划 / 计划月报 / 日常日报
+ * 报表浏览 — 日计划 / 周计划 / 计划月报 / 日常日报
  *
  * 交互:
  *   - 列表行点「查看」→ 在当前页打开详情弹层(不跳转)
@@ -34,6 +34,7 @@ var PB_STATUS_CLASS = {
 var PB_SVG_CLOSE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 var PB_SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="9.5" r="1.6" stroke="currentColor" stroke-width="1.6"/><path d="M4 17l4.5-4.5L13 17l3-2.5 4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 var PB_SVG_EXCEL = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 12.5l4 5M13.5 12.5l-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+var PB_SVG_PDF = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.5 17v-4h1.6a1.2 1.2 0 0 1 0 2.4H8.5M13 17v-4h1a1.6 1.6 0 0 1 0 4h-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /* ------------------------------------------------------------
  * 数据源 (common.js 内存缓存, 登录时随 bootstrap 一起加载)
@@ -103,12 +104,15 @@ function pbTitle(rec, tab) {
     var s = rec.startDate || '', e = rec.endDate || '';
     return (s || e) ? (s + ' ~ ' + e) : '周计划';
   }
+  /* 日报表: 审批通过后显示「{计划工作日期}年月日计划工作完成情况」 */
+  if (tab === 'report') return reportDisplayTitle(rec);
   return rec.date || '(无日期)';
 }
 function pbSub(rec, tab) {
   if (tab === 'daily') {
     var n = (rec.tasks || []).length;
-    return n + ' 项任务 · ' + (PB_DAILY_STATUS[rec.status] || '草稿');
+    var pd = rec.plan_date && rec.plan_date !== rec.date ? ' · 计划 ' + rec.plan_date : '';
+    return n + ' 项任务 · ' + (PB_DAILY_STATUS[rec.status] || '草稿') + pd;
   }
   if (tab === 'weekly') {
     var p = pbProjectName(rec.projectId);
@@ -116,8 +120,8 @@ function pbSub(rec, tab) {
   }
   if (tab === 'report') {
     var cats = [];
-    if (rec.categories && rec.categories.repair) cats.push('日常维修');
     if (rec.categories && rec.categories.plan) cats.push('计划工作');
+    if (rec.categories && rec.categories.repair) cats.push('日常维修');
     return (rec.tasks || []).length + ' 项 · ' + (REPORT_STATUS_TEXT[rec.status] || rec.status || '-') +
       (cats.length ? ' · ' + cats.join('/') : '');
   }
@@ -229,9 +233,10 @@ function pbWeeklyDetail(rec) {
 function pbReportDetail(rec) {
   var meta = '<div class="pb-meta-grid">' +
     pbMeta('填报日期', esc(rec.date)) +
+    pbMeta('计划工作日期', esc(rec.plan_date || rec.date)) +
     pbMeta('状态', pbStatusTag(rec.status, REPORT_STATUS_TEXT)) +
-    pbMeta('报表类别', [rec.categories && rec.categories.repair ? '日常维修每日完成情况' : '',
-                       rec.categories && rec.categories.plan ? '计划工作每日完成情况' : '']
+    pbMeta('报表类别', [rec.categories && rec.categories.plan ? '计划工作每日完成情况' : '',
+                       rec.categories && rec.categories.repair ? '日常维修每日完成情况' : '']
       .filter(Boolean).join('、')) +
     pbMeta('提交时间', esc(pbTime(rec.submitted_at))) +
     pbMeta('签名时间', esc(pbTime(rec.signed_at))) +
@@ -280,15 +285,17 @@ function pbFullHref(rec, tab) {
 }
 
 /* ------------------------------------------------------------
- * 导出 Excel
- *   复用 assets/export-excel.js (SheetJS)
+ * 导出
+ *   Excel: assets/export-excel.js (SheetJS)
+ *   图片 / PDF: assets/export-media.js (html2canvas + jsPDF)
  *   日计划: 沿用填报页的业务规则 —— 仅「已通过」可导出
+ *   三种导出的文件名与文档标题均取「计划日期」而非填报日期
  * ------------------------------------------------------------ */
 function pbExportable(tab) {
   return tab === 'daily' || tab === 'weekly' || tab === 'report';
 }
 function pbExportBlockedReason(rec, tab) {
-  if (tab === 'daily' && (rec.status || 'draft') !== 'approved') return '仅审批通过的日计划可导出 Excel';
+  if (tab === 'daily' && (rec.status || 'draft') !== 'approved') return '仅审批通过的日计划可导出';
   return '';
 }
 function pbExport(rec, tab) {
@@ -322,11 +329,20 @@ function pbOpenDetail(rec, tab, opts) {
 
   var full = pbFullHref(rec, tab);
   var blocked = pbExportBlockedReason(rec, tab);
-  var exportBtn = !pbExportable(tab) ? '' :
-    '<button class="btn btn-success pb-export" type="button"' +
-      (blocked ? ' disabled title="' + esc(blocked) + '"' : '') + '>' +
-      PB_SVG_EXCEL + '<span>导出 Excel</span>' +
-    '</button>';
+  var dis = blocked ? ' disabled title="' + esc(blocked) + '"' : '';
+  /* 导出 Excel / 图片 / PDF 并列可选 */
+  var exportGroup = !pbExportable(tab) ? '' :
+    '<span class="pb-export-group">' +
+      '<button class="btn btn-success pb-export" type="button"' + dis + '>' +
+        PB_SVG_EXCEL + '<span>Excel</span>' +
+      '</button>' +
+      '<button class="btn btn-default pb-export-img" type="button"' + dis + '>' +
+        PB_SVG_PHOTO + '<span>图片</span>' +
+      '</button>' +
+      '<button class="btn btn-default pb-export-pdf" type="button"' + dis + '>' +
+        PB_SVG_PDF + '<span>PDF</span>' +
+      '</button>' +
+    '</span>';
 
   var ov = document.createElement('div');
   ov.className = 'modal-overlay pb-overlay';
@@ -342,7 +358,7 @@ function pbOpenDetail(rec, tab, opts) {
       '</div>' +
       '<div class="modal-body">' + pbDetailHtml(rec, tab) + '</div>' +
       '<div class="modal-footer">' +
-        exportBtn +
+        exportGroup +
         '<button class="btn-secondary pb-close" type="button">关闭</button>' +
       '</div>' +
     '</div>';
@@ -358,13 +374,24 @@ function pbOpenDetail(rec, tab, opts) {
   }
   ov.querySelector('.modal-close').onclick = close;
   ov.querySelector('.pb-close').onclick = close;
-  var expBtn = ov.querySelector('.pb-export');
-  if (expBtn) {
-    expBtn.onclick = function () {
-      if (expBtn.disabled) { toast(pbExportBlockedReason(rec, tab) || '当前记录不可导出', 'warn'); return; }
-      pbExport(rec, tab);
+  function guard(btn, fn) {
+    return function () {
+      if (btn.disabled) { toast(pbExportBlockedReason(rec, tab) || '当前记录不可导出', 'warn'); return; }
+      fn();
     };
   }
+  var expBtn = ov.querySelector('.pb-export');
+  if (expBtn) expBtn.onclick = guard(expBtn, function () { pbExport(rec, tab); });
+  var imgBtn = ov.querySelector('.pb-export-img');
+  if (imgBtn) imgBtn.onclick = guard(imgBtn, function () {
+    if (typeof pbExportMedia !== 'function') { toast('导出组件未加载', 'error'); return; }
+    pbExportMedia(rec, tab, 'image');
+  });
+  var pdfBtn = ov.querySelector('.pb-export-pdf');
+  if (pdfBtn) pdfBtn.onclick = guard(pdfBtn, function () {
+    if (typeof pbExportMedia !== 'function') { toast('导出组件未加载', 'error'); return; }
+    pbExportMedia(rec, tab, 'pdf');
+  });
   ov.addEventListener('mousedown', function (e) { if (e.target === ov) ov._bg = true; });
   ov.addEventListener('click', function (e) {
     if (e.target === ov && ov._bg) { ov._bg = false; close(); }
@@ -397,9 +424,9 @@ async function initPlanBrowsePage() {
   renderPage({
     active: 'browse',
     pageHtml:
-      '<nav class="breadcrumb"><a href="dashboard.html">工作台</a><span class="sep">/</span><span>计划浏览</span></nav>' +
-      '<div class="page-header"><div><h2>计划浏览</h2>' +
-        '<div class="page-sub">查看已填报的计划，点击右侧「查看」可直接展开详情</div></div></div>' +
+      '<nav class="breadcrumb"><a href="dashboard.html">工作台</a><span class="sep">/</span><span>报表浏览</span></nav>' +
+      '<div class="page-header"><div><h2>报表浏览</h2>' +
+        '<div class="page-sub">查看已填报的日计划 / 周计划 / 日常日报，点击右侧「查看」展开详情，并可按需导出 Excel / 图片 / PDF</div></div></div>' +
       '<div class="tabs">' + PB_TABS.map(function (t) {
         var n = pbList(t.id).length;
         return '<a class="tab' + (t.id === tab ? ' active' : '') + '" href="?tab=' + t.id + '">' +

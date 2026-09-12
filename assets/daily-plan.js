@@ -42,6 +42,31 @@ function upsertDailyPlan(rec) {
   }
 }
 
+/* 下一次填报的目标日期
+ *   - 草稿 / 已驳回: 仍停留在原日期, 便于继续修改(不丢内容)
+ *   - 待审批 / 已通过: 视为已归档, 顺延到"计划日期"(即下一个填报日), 页面给出空白表单
+ *   - "计划日期"相对"填报日期"的间隔按最近一次填报的习惯顺延(默认 +1 天) */
+function dpNextFillTarget() {
+  var d = todayStr();
+  var offset = 1;
+  for (var i = 0; i < 120; i++) {
+    var rec = getDailyPlanByDate(d);
+    if (!rec) return { date: d, plan_date: addDaysStr(d, offset) };
+    if (rec.status === 'draft' || rec.status === 'rejected') {
+      return { date: rec.date || d, plan_date: rec.plan_date || rec.date || d };
+    }
+    if (rec.date && rec.plan_date && rec.plan_date > rec.date) {
+      var gap = Math.round((new Date(rec.plan_date) - new Date(rec.date)) / 86400000);
+      if (gap > 0 && gap < 30) offset = gap;
+      d = rec.plan_date;
+    } else {
+      d = addDaysStr(rec.date || d, 1);
+    }
+    if (!d) break;
+  }
+  return { date: d || todayStr(), plan_date: addDaysStr(d || todayStr(), offset) };
+}
+
 /* ---------- 表单初始化 ---------- */
 function newTask() {
   return {
@@ -81,7 +106,14 @@ async function initDailyPlanPage() {
   if (!user) return;
 
   var members = loadMembers().filter(function (m) { return m.active !== false; });
-  var urlDate = queryParam('date') || todayStr();
+  /* 无 ?date 参数时, 不再回显"已提交/已通过"的记录, 直接给出下一次填报的空白表单 */
+  var urlDate = queryParam('date') || '';
+  var prePlanDate = '';
+  if (!urlDate) {
+    var target = dpNextFillTarget();
+    urlDate = target.date;
+    prePlanDate = target.plan_date;
+  }
   var form = null;
 
   /* 显示给用户的人员: 仅班长/工人 */
@@ -124,6 +156,7 @@ async function initDailyPlanPage() {
       };
     } else {
       form = defaultDailyPlan(urlDate);
+      if (prePlanDate) form.plan_date = prePlanDate;
     }
     render();
   }
@@ -204,8 +237,13 @@ async function initDailyPlanPage() {
       form.rejected_reason = '';
       form.rejected_at = '';
       persist();
-      toast('已提交,等待审批', 'success');
-      render();
+      /* 提交后不再回显本条内容: 自动顺延到下一次填报日期, 给出一张空白表单 */
+      var submittedDate = form.date;
+      var next = dpNextFillTarget();
+      urlDate = next.date;
+      prePlanDate = next.plan_date;
+      toast('已提交,等待审批(' + submittedDate + ') · 已为你打开下一次空白表单', 'success');
+      loadForm();
     });
   }
   function reopenToEdit() {
@@ -578,10 +616,12 @@ async function initDailyPlanPage() {
       if (hasContent && (form.status === 'draft' || form.status === 'rejected')) {
         confirmDialog('切换日期', '当前日期"' + form.date + '"已有内容,是否保存后切换?', function () {
           persist();
+          prePlanDate = '';   /* 手动指定日期时, 计划日期回到默认(= 填报日期) */
           urlDate = newDate;
           loadForm();
         }, function () { dateEl.value = form.date; });
       } else {
+        prePlanDate = '';
         urlDate = newDate;
         loadForm();
       }

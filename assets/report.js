@@ -21,9 +21,10 @@ async function initReportPage() {
   var form = null;
 
   /* ===== 类别定义(可勾选标题) ===== */
+  /* 顺序: 计划工作在前(默认勾选), 日常维修在后 */
   var CATEGORIES = [
-    { id: 'repair', label: '日常维修每日完成情况' },
-    { id: 'plan',   label: '计划工作每日完成情况' }
+    { id: 'plan',   label: '计划工作每日完成情况' },
+    { id: 'repair', label: '日常维修每日完成情况' }
   ];
 
   function defaultTask() {
@@ -44,7 +45,10 @@ async function initReportPage() {
   function defaultForm() {
     return {
       date: todayStr(),
-      categories: { repair: false, plan: false },
+      /* 计划工作日期: 该日报表所对应的"计划工作"日期, 审批通过后作为标题日期 */
+      plan_date: todayStr(),
+      /* 默认勾选「计划工作每日完成情况」 */
+      categories: { repair: false, plan: true },
       tasks: [defaultTask()],
       remarks: '',
       status: 'draft',
@@ -84,12 +88,16 @@ async function initReportPage() {
         }
         var r = res.record;
         var cats = (r.categories && typeof r.categories === 'object') ? r.categories : {};
+        /* 旧记录没有分类时, 默认落到「计划工作每日完成情况」 */
+        var catRepair = !!cats.repair, catPlan = !!cats.plan;
+        if (!catRepair && !catPlan) catPlan = true;
         form = {
           _id: r._id,
           date: r.date || todayStr(),
+          plan_date: r.plan_date || r.date || todayStr(),
           categories: {
-            repair: !!cats.repair,
-            plan: !!cats.plan
+            repair: catRepair,
+            plan: catPlan
           },
           tasks: (r.tasks && r.tasks.length > 0)
             ? r.tasks.map(function (t) {
@@ -190,10 +198,11 @@ async function initReportPage() {
   }
 
   /* ---------- 保存 ---------- */
-  function saveForm(done, showMsg) {
+  function saveForm(done, showMsg, afterSuccess) {
     var payload = {
       _id: isEdit ? recordId : (form._id || null),
       date: form.date,
+      plan_date: form.plan_date || form.date,
       categories: form.categories,
       status: form.status,
       remarks: form.remarks,
@@ -223,6 +232,7 @@ async function initReportPage() {
         form.signed_at = res.record.signed_at || form.signed_at;
         form.rejected_at = res.record.rejected_at || form.rejected_at;
       }
+      if (afterSuccess) { afterSuccess(); return; }
       if (showMsg) {
         toast('操作成功');
         setTimeout(function () { location.href = 'reports.html'; }, 900);
@@ -237,12 +247,27 @@ async function initReportPage() {
     });
   }
 
+  /* 提交完成后: 清空当前表单, 打开一张新的空白日报表(不回显已提交内容) */
+  function resetToBlank() {
+    recordId = null;
+    isEdit = false;
+    form = defaultForm();
+    /* 地址栏里的 ?id= 一并清掉, 避免刷新后又加载回刚刚提交的那条 */
+    try { history.replaceState(null, '', 'report.html'); } catch (_) { /* ignore */ }
+    render();
+  }
+
   /* ---------- 状态操作 ---------- */
   function submitForm() {
     if (!validateForm(true)) return;
     confirmDialog('确认提交', '提交后将进入待审批状态，是否继续？', function () {
       form.status = 'submitted';
-      saveForm(null, true);
+      var submittedOn = form.plan_date || form.date;
+      saveForm(null, false, function () {
+        /* 提交后不再回显本条内容, 直接打开下一张空白日报表 */
+        resetToBlank();
+        toast('已提交,等待审批(' + submittedOn + ') · 已为你打开新的空白日报表', 'success');
+      });
     });
   }
 
@@ -284,6 +309,10 @@ async function initReportPage() {
     if (!form) return;
     var st = form.status;
     var editable = (st === 'draft');
+    /* 审批通过后标题为「{计划工作日期}年月日计划工作完成情况」 */
+    var pageTitle = (st === 'signed')
+      ? reportDisplayTitle({ status: st, plan_date: form.plan_date, date: form.date, categories: form.categories })
+      : (isEdit ? '编辑记录' : '新建日报表');
 
     /* 标题分类单选区(只能勾选其一) */
     var categoriesHtml =
@@ -360,7 +389,7 @@ async function initReportPage() {
     content.innerHTML =
       '<div class="detail-back"><a href="reports.html">‹ 日报记录</a></div>' +
       '<div class="page-header-row">' +
-        '<h2 class="page-title-text">' + (isEdit ? '编辑记录' : '新建日报表') +
+        '<h2 class="page-title-text">' + esc(pageTitle) +
           '<span class="report-status-tag report-status-' + esc(st) + '">' + (REPORT_STATUS_TEXT[st] || st) + '</span>' +
         '</h2>' +
         '<div class="page-actions">' +
@@ -371,9 +400,15 @@ async function initReportPage() {
       categoriesHtml +
 
       '<div class="section rp-section">' +
-        '<div class="form-section">' +
-          '<label class="form-label">填报日期</label>' +
-          '<input class="input" type="date" id="r_date" value="' + esc(form.date) + '"' + (editable ? '' : ' disabled') + '>' +
+        '<div class="form-grid form-grid-2">' +
+          '<div class="form-section">' +
+            '<label class="form-label">填报日期</label>' +
+            '<input class="input" type="date" id="r_date" value="' + esc(form.date) + '"' + (editable ? '' : ' disabled') + '>' +
+          '</div>' +
+          '<div class="form-section">' +
+            '<label class="form-label">计划工作日期 <span class="sec-meta">审批通过后作为标题日期</span></label>' +
+            '<input class="input" type="date" id="r_plan_date" value="' + esc(form.plan_date || form.date) + '"' + (editable ? '' : ' disabled') + '>' +
+          '</div>' +
         '</div>' +
       '</div>' +
 
@@ -401,10 +436,8 @@ async function initReportPage() {
   /* 渲染单个任务行 */
   function renderTaskRow(t, i, editable) {
     var undone = t.status === 'undone';
-    /* 兜底: 旧记录无 attachments 时,补默认值 */
-    if (!t.attachments || typeof t.attachments !== 'object') {
-      t.attachments = { before: '', during: '', after: '' };
-    }
+    /* 兜底: 新格式统一为数组(旧 base64 格式已在 loadForm 里由 normalizeAttachments 转换) */
+    if (!Array.isArray(t.attachments)) t.attachments = [];
 
     var memberChips = (t.members || []).map(function (mid) {
       var m = members.find(function (mm) { return mm._id === mid; });
@@ -487,6 +520,9 @@ async function initReportPage() {
   function bindEvents() {
     var dateInput = document.getElementById('r_date');
     if (dateInput) dateInput.onchange = function () { form.date = dateInput.value; };
+
+    var planDateInput = document.getElementById('r_plan_date');
+    if (planDateInput) planDateInput.onchange = function () { form.plan_date = planDateInput.value; };
 
     var remarksEl = document.getElementById('r_remarks');
     if (remarksEl) remarksEl.oninput = function () { form.remarks = remarksEl.value; };
@@ -640,6 +676,7 @@ async function initReportPage() {
     if (btnExport) btnExport.onclick = function () {
       var payload = {
         date: form.date, status: form.status, remarks: form.remarks,
+        plan_date: form.plan_date || form.date,
         categories: form.categories,
         approver: form.approver, rejected_reason: form.rejected_reason,
         signature: form.signatureImg,
@@ -808,7 +845,8 @@ async function initReportPage() {
     if (!row) return;
     var oldField = row.querySelector('.rp-task-attachments');
     if (!oldField) return;
-    var editable = canEdit();
+    /* 原先误用了不存在的全局 canEdit(), 上传第 2 张起会抛错导致缩略图不刷新 */
+    var editable = (form.status === 'draft');
     var newField = parseFragment(renderAttachmentField(taskIdx, t, editable));
     oldField.parentNode.replaceChild(newField, oldField);
     /* 重新绑定事件 */

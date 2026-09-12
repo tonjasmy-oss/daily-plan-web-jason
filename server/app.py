@@ -108,12 +108,14 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS reports (
   id TEXT PRIMARY KEY,
   date TEXT DEFAULT '',
+  plan_date TEXT DEFAULT '',
   status TEXT DEFAULT 'draft',
   remarks TEXT DEFAULT '',
   approver TEXT DEFAULT '',
   rejected_reason TEXT DEFAULT '',
   signature TEXT DEFAULT '',
   tasks_json TEXT DEFAULT '[]',
+  categories_json TEXT DEFAULT '{}',
   created_by TEXT DEFAULT '',
   submitted_at TEXT DEFAULT '',
   signed_at TEXT DEFAULT '',
@@ -143,6 +145,11 @@ CREATE TABLE IF NOT EXISTS weekly_plans (
   id TEXT PRIMARY KEY,
   week_start TEXT DEFAULT '',
   week_end TEXT DEFAULT '',
+  start_date TEXT DEFAULT '',
+  end_date TEXT DEFAULT '',
+  project_id TEXT DEFAULT '',
+  tasks_json TEXT DEFAULT '[]',
+  created_by TEXT DEFAULT '',
   title TEXT DEFAULT '',
   status TEXT DEFAULT 'draft',
   content TEXT DEFAULT '',
@@ -284,13 +291,26 @@ def row_to_task(r):
     }
 
 
+def _col(r, name, default=''):
+    """安全取列: 兼容尚未跑过 migrate_db 的历史库"""
+    try:
+        v = r[name]
+    except (IndexError, KeyError):
+        return default
+    return default if v is None else v
+
+
 def row_to_report(r):
     return {
-        '_id': r['id'], 'date': r['date'], 'status': r['status'],
+        '_id': r['id'], 'date': r['date'],
+        # 计划工作日期: 老记录没有这一列/为空时回落为填报日期
+        'plan_date': _col(r, 'plan_date', '') or r['date'],
+        'status': r['status'],
         'remarks': r['remarks'], 'approver': r['approver'],
         'rejected_reason': r['rejected_reason'],
         'signature': r['signature'],
         'tasks': json.loads(r['tasks_json'] or '[]'),
+        'categories': json.loads(_col(r, 'categories_json', '') or '{}'),
         'created_by': r['created_by'],
         'submitted_at': r['submitted_at'], 'signed_at': r['signed_at'],
         'rejected_at': r['rejected_at'],
@@ -313,8 +333,15 @@ def row_to_daily_plan(r):
 
 
 def row_to_weekly_plan(r):
+    # startDate/endDate 是新字段; 老数据回落到 week_start/week_end
+    ws = _col(r, 'start_date', '') or r['week_start']
+    we = _col(r, 'end_date', '') or r['week_end']
     return {
         '_id': r['id'], 'week_start': r['week_start'], 'week_end': r['week_end'],
+        'startDate': ws, 'endDate': we,
+        'projectId': _col(r, 'project_id', ''),
+        'tasks': json.loads(_col(r, 'tasks_json', '') or '[]'),
+        'createdBy': _col(r, 'created_by', ''),
         'title': r['title'], 'status': r['status'],
         'content': r['content'],
         'members': json.loads(r['members_json'] or '[]'),
@@ -391,6 +418,36 @@ def init_db():
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
+
+
+def migrate_db():
+    """轻量幂等迁移: 给历史库补齐后续新增的列"""
+    conn = get_db()
+    try:
+        new_cols = {
+            'reports': [
+                ('plan_date', "TEXT DEFAULT ''"),
+                ('categories_json', "TEXT DEFAULT '{}'"),
+            ],
+            'weekly_plans': [
+                ('start_date', "TEXT DEFAULT ''"),
+                ('end_date', "TEXT DEFAULT ''"),
+                ('project_id', "TEXT DEFAULT ''"),
+                ('tasks_json', "TEXT DEFAULT '[]'"),
+                ('created_by', "TEXT DEFAULT ''"),
+            ],
+        }
+        for table, cols in new_cols.items():
+            have = {row['name'] for row in conn.execute('PRAGMA table_info(%s)' % table).fetchall()}
+            if not have:
+                continue          # 表还不存在, 交给 SCHEMA 建
+            for name, ddl in cols:
+                if name not in have:
+                    conn.execute('ALTER TABLE %s ADD COLUMN %s %s' % (table, name, ddl))
+                    print('[migrate] %s += %s' % (table, name))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------- 种子数据（与原前端 seedIfEmpty 一致） ----------
@@ -665,19 +722,23 @@ def upsert_report(conn, data, uid):
                 signed = now
             elif status == 'rejected':
                 rejected = now
-    fields = (data.get('date', ''), status, data.get('remarks', ''),
+    fields = (data.get('date', ''),
+              # 计划工作日期: 未传时与填报日期一致, 老记录保持不变
+              data.get('plan_date', '') or data.get('date', '') or (old['plan_date'] if old else ''),
+              status, data.get('remarks', ''),
               data.get('approver', ''), data.get('rejected_reason', ''),
               data.get('signature', ''),
               json.dumps(data.get('tasks', []), ensure_ascii=False),
+              json.dumps(data.get('categories') or {}, ensure_ascii=False),
               uid if old is None else (old['created_by'] or uid),
               submitted, signed, rejected)
     if old:
         conn.execute(
-            'UPDATE reports SET date=?,status=?,remarks=?,approver=?,rejected_reason=?,signature=?,tasks_json=?,created_by=?,submitted_at=?,signed_at=?,rejected_at=?,updated_at=? WHERE id=?',
+            'UPDATE reports SET date=?,plan_date=?,status=?,remarks=?,approver=?,rejected_reason=?,signature=?,tasks_json=?,categories_json=?,created_by=?,submitted_at=?,signed_at=?,rejected_at=?,updated_at=? WHERE id=?',
             fields + (now, rid))
     else:
         conn.execute(
-            'INSERT INTO reports (id,date,status,remarks,approver,rejected_reason,signature,tasks_json,created_by,submitted_at,signed_at,rejected_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO reports (id,date,plan_date,status,remarks,approver,rejected_reason,signature,tasks_json,categories_json,created_by,submitted_at,signed_at,rejected_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (rid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return rid
@@ -712,20 +773,30 @@ def upsert_daily_plan(conn, data):
 def upsert_weekly_plan(conn, data):
     wid = data.get('_id') or gen_id('wp')
     now = now_iso()
-    fields = (data.get('week_start', ''), data.get('week_end', ''),
-              data.get('title', ''), data.get('status', 'draft'),
+    old = conn.execute('SELECT * FROM weekly_plans WHERE id=?', (wid,)).fetchone()
+    old_start = _col(old, 'start_date', '') if old else ''
+    old_end = _col(old, 'end_date', '') if old else ''
+    # 兼容两套字段名: 新前端用 startDate/endDate, 老数据用 week_start/week_end
+    start = data.get('startDate') or data.get('week_start') or old_start or ''
+    end = data.get('endDate') or data.get('week_end') or old_end or ''
+    title = data.get('title') or ((start + ' ~ ' + end) if (start or end) else '')
+    fields = (start, end,
+              start, end,
+              data.get('projectId', '') or (_col(old, 'project_id', '') if old else ''),
+              json.dumps(data.get('tasks', []), ensure_ascii=False),
+              data.get('createdBy', '') or (_col(old, 'created_by', '') if old else ''),
+              title, data.get('status', 'draft'),
               data.get('content', ''),
               json.dumps(data.get('members', []), ensure_ascii=False),
               data.get('submitter', ''), data.get('submitted_at', ''),
               data.get('approver', ''), data.get('approved_at', ''))
-    old = conn.execute('SELECT id FROM weekly_plans WHERE id=?', (wid,)).fetchone()
     if old:
         conn.execute(
-            'UPDATE weekly_plans SET week_start=?,week_end=?,title=?,status=?,content=?,members_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
+            'UPDATE weekly_plans SET week_start=?,week_end=?,start_date=?,end_date=?,project_id=?,tasks_json=?,created_by=?,title=?,status=?,content=?,members_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
             fields + (now, wid))
     else:
         conn.execute(
-            'INSERT INTO weekly_plans (id,week_start,week_end,title,status,content,members_json,submitter,submitted_at,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO weekly_plans (id,week_start,week_end,start_date,end_date,project_id,tasks_json,created_by,title,status,content,members_json,submitter,submitted_at,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (wid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return wid
@@ -1723,6 +1794,7 @@ def main():
         except ValueError:
             pass
     init_db()
+    migrate_db()
     seed_if_empty()
     load_sessions()
     server = ThreadingHTTPServer(('0.0.0.0', port), Handler)

@@ -37,7 +37,7 @@ var NAV_ITEMS = [
   { id: 'weekly-plan',label: '周计划填报', icon: 'weeklyPlan', href: 'weekly-plan.html',roles: null,                  group: '填报' },
   { id: 'report',     label: '日报表填报', icon: 'report',     href: 'report.html',     roles: null,                  group: '填报' },
   { id: 'weekly-rpt', label: '计划周报',   icon: 'weeklyRpt',  href: 'weekly-report.html', roles: null,                group: '填报' },
-  { id: 'browse',     label: '计划浏览',   icon: 'browse',     href: 'plan-browse.html',roles: null,                  group: '填报' },
+  { id: 'browse',     label: '报表浏览',   icon: 'browse',     href: 'plan-browse.html',roles: null,                  group: '填报' },
   { id: 'purchase',   label: '物资申购',   icon: 'purchase',   href: 'purchase.html',   roles: null,                  group: '填报' },
   { id: 'reports',    label: '历史记录',   icon: 'reports',    href: 'reports.html',    roles: null,                  group: '管理' },
   { id: 'approval',   label: '审批管理',   icon: 'approval',   href: 'approval.html',   roles: ['admin','manager'],   group: '管理' },

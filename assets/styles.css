@@ -3032,7 +3032,7 @@ table.data-table {
 }
 
 /* ============================================================
- * 计划浏览 — 详情弹层 (W7)
+ * 报表浏览 — 详情弹层 (W7)
  * ============================================================ */
 .pb-overlay .modal-body { max-height: 68vh; }
 .pb-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -3079,5 +3079,17 @@ table.data-table {
   .pb-meta-label { flex-basis: 64px; }
   .pb-overlay .modal-body { max-height: none; }
 }
+
+/* 详情弹层底部: 导出 Excel / 图片 / PDF 并列, 关闭按钮靠右 */
+.pb-export-group { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; flex-wrap: wrap; }
+.pb-export-group .btn { white-space: nowrap; }
+@media (max-width: 640px) {
+  .pb-export-group { width: 100%; margin: 0 0 8px; }
+  .pb-export-group .btn { flex: 1 1 auto; justify-content: center; }
+}
+
+/* 计划周报: 留档行(不可跳转) */
+.wr-row { cursor: default; }
+.wr-row:hover { border-color: var(--border); }
 
 
