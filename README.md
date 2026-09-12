@@ -5,17 +5,18 @@
 
 ## 与上一版（纯前端 localStorage）的区别
 
-| | 旧版 v1 | 本版 v2（当前） |
+| | 旧版 v1 | 本版 v3（当前） |
 |---|---|---|
 | 数据存储 | 浏览器 localStorage | **服务器 SQLite 数据库**（`server/data.db`） |
-| 多端同步 | ✗ 换浏览器丢数据 | ✓ 所有设备访问同一份数据 |
+| 多端同步 | ✗ 换浏览器丢数据 | ✓ **所有设备访问同一份数据** |
 | 日报模块 | ✗ 无 | ✓ **完整移植 v5**（含审批流 + 手写签名 + 工作照片） |
 | 日计划填报 | ✗ 无 | ✓ **审批流 + 角色权限 + Excel 导出** |
 | 后端 | 无 | ✓ 纯 Python 标准库，**零第三方依赖** |
+| **全模块数据库化** | ✗ 8 类仍在 localStorage | ✓ **v3 起全部 12 类走 SQLite** |
 
 ## 核心特性
 
-- ✅ **数据库管理**：SQLite 单文件数据库，首启自动建库 + 注入种子数据
+- ✅ **全模块数据库管理**：SQLite 单文件数据库，**所有 12 类业务数据**走 SQLite（members / projects / tasks / reports / daily_plans / weekly_plans / weekly_reports / purchases / approvals / departments / roles / settings）
 - ✅ **零依赖后端**：`server/app.py` 仅用 Python 标准库（http.server + sqlite3），无需 pip 安装任何东西
 - ✅ **v5 日报全功能移植**：日期 / 标题分类（单选）/ 动态任务列表 / 备注 / 审批人 / 驳回原因 / Canvas 手写签名 / 草稿-提交-签名-驳回状态机 / **附件上传（处理前/中/后）** / 导出 Excel / 历史记录（分页 + 搜索 + 状态筛选）
 - ✅ **日计划填报 v3**：填报日期 + 计划日期 + 标题 banner / 任务 4 字段（计划工作内容/计划实施人员/计划完成时间/工作要求）/ 人员安排（夜班/休息/调休，仅显示班长/工人）/ 备注 / 审批流（主管以上→ 班长/工人查看）/ 审批通过后导出 Excel
@@ -98,8 +99,16 @@ daily-plan-web/
 | `projects` | 项目（成员/经理/进度/状态，进度随任务自动联动） |
 | `tasks` | 任务（评论 JSON + 状态历史 JSON） |
 | `reports` | ★ 日报（任务 JSON + 签名 base64 + **附件 base64** + 审批时间戳） |
+| `daily_plans` | ★ 日计划（任务 JSON + 人员安排 night/rest/adjust + 审批流） |
+| `weekly_plans` | 周计划（content + members + 审批） |
+| `weekly_reports` | 计划周报（summary + items + 审批） |
+| `purchases` | 物资申购 |
+| `approvals` | 审批管理（type / ref_id / payload / 决策时间） |
+| `departments` | 部门管理（parent_id 树形结构） |
+| `roles` | 角色权限（permissions 数组） |
+| `settings` | 系统参数（KV 表，key 主键） |
 
-清空数据：个人中心 → 「数据管理」→「清空所有数据」（直接清库）。
+清空数据：系统设置 → 「危险操作」→「清空全部数据」(POST `/api/reset`)。
 
 ## REST API 一览
 
@@ -114,7 +123,16 @@ daily-plan-web/
 | GET | `/api/reports?page&status&q` | 日报列表：分页 + 状态筛选 + 关键词搜索 |
 | POST | `/api/reports` | 日报新增/更新（tasks 含 attachments 附件 base64） |
 | DELETE | `/api/reports/:id` | 删除日报 |
-| GET/POST | `/api/backup` `/api/restore` `/api/reset` | 备份 / 恢复 / 清空 |
+| GET/POST | `/api/daily-plans[/:id]` | 日计划列表/详情/创建/更新/删除（支持分页/状态筛选/搜索） |
+| GET/POST | `/api/weekly-plans[/:id]` | 周计划 CRUD |
+| GET/POST | `/api/weekly-reports[/:id]` | 计划周报 CRUD |
+| GET/POST | `/api/purchases[/:id]` | 物资申购 CRUD |
+| GET/POST | `/api/approvals[/:id]` | 审批管理 CRUD |
+| GET/POST | `/api/departments[/:id]` | 部门 CRUD |
+| GET/POST | `/api/roles[/:id]` | 角色 CRUD |
+| GET/POST/DELETE | `/api/settings[/:key]` | 系统参数 KV |
+| POST | `/api/migrate` | **从 localStorage 一键迁移到 SQLite**（首启自动触发） |
+| GET/POST | `/api/backup` `/api/restore` `/api/reset` | 备份 / 恢复 / 清空（12 类全量） |
 
 ## 响应式断点
 

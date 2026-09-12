@@ -1,30 +1,23 @@
 /* ============================================================
  * 系统参数 (W14) - 应用名称/版本号等 6 输入 + 2 toggle
+ * 数据由 /api/settings 管理, 内存缓存见 common.js (getSetting/setSetting)
  * ============================================================ */
-var SETTINGS_KEY = 'engms_settings_v1';
-function loadSettings() {
-  try {
-    var s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
-    return s || {
-      appName: '工程管理系统',
-      version: 'v5.0',
-      company: '某某建筑工程有限公司',
-      phone: '010-12345678',
-      email: 'contact@example.com',
-      maxUsers: 50,
-      autoBackup: true,
-      purchasePerm: true
-    };
-  } catch (e) { return {}; }
-}
-function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
 async function initSettingsPage() {
   var user = await requireLogin();
   if (!user) return;
   if (!isAdmin()) { toast('需要管理员权限', 'warn'); setTimeout(function(){ location.href='dashboard.html'; }, 800); return; }
 
-  var s = loadSettings();
+  var s = Object.assign({
+    appName: '工程管理系统',
+    version: 'v5.0',
+    company: '某某建筑工程有限公司',
+    phone: '010-12345678',
+    email: 'contact@example.com',
+    maxUsers: 50,
+    autoBackup: true,
+    purchasePerm: true
+  }, getSetting('general', {}));
 
   var content = renderPage({
     active: 'settings',
@@ -45,9 +38,9 @@ async function initSettingsPage() {
       toggle('物资申购需要审批', '启用后,所有物资申购必须经审批通过才能入库', s.purchasePerm) +
       '</div></div>' +
       '<div class="section"><h3>危险操作</h3><div style="display:flex;gap:12px;flex-wrap:wrap">' +
-      '<button class="btn-ghost" id="stExport">导出全部数据</button>' +
+      '<button class="btn-ghost" id="stExport">导出全部数据 (服务端)</button>' +
       '<button class="btn-ghost" id="stImport">从备份恢复</button>' +
-      '<button class="btn-danger" id="stReset">清空全部数据</button>' +
+      '<button class="btn-danger" id="stReset">清空全部数据 (服务端)</button>' +
       '</div></div>'
   });
 
@@ -64,37 +57,37 @@ async function initSettingsPage() {
   }
 
   document.getElementById('stSave').addEventListener('click', function () {
-    s.appName = document.getElementById('stAppName').value;
-    s.version = document.getElementById('stVersion').value;
-    s.company = document.getElementById('stCompany').value;
-    s.phone = document.getElementById('stPhone').value;
-    s.email = document.getElementById('stEmail').value;
-    s.maxUsers = parseInt(document.getElementById('stMax').value, 10) || 50;
-    s.autoBackup = document.querySelector('[data-toggle]').checked;
-    s.purchasePerm = document.querySelectorAll('[data-toggle]')[1].checked;
-    saveSettings(s);
+    var payload = {
+      appName: document.getElementById('stAppName').value,
+      version: document.getElementById('stVersion').value,
+      company: document.getElementById('stCompany').value,
+      phone: document.getElementById('stPhone').value,
+      email: document.getElementById('stEmail').value,
+      maxUsers: parseInt(document.getElementById('stMax').value, 10) || 50,
+      autoBackup: document.querySelector('[data-toggle]').checked,
+      purchasePerm: document.querySelectorAll('[data-toggle]')[1].checked,
+    };
+    setSetting('general', payload);  /* 走 /api/settings */
     toast('设置已保存', 'success');
   });
 
+  /* 导出 - 直接请求服务端 /api/backup 拿到全量 JSON */
   document.getElementById('stExport').addEventListener('click', function () {
-    var data = {
-      exported_at: new Date().toISOString(),
-      members: loadMembers(), projects: loadProjects(), tasks: loadTasks(),
-      departments: loadDepts(), roles: loadRoles(),
-      approvals: JSON.parse(localStorage.getItem('engms_approvals_v1') || '[]'),
-      purchases: JSON.parse(localStorage.getItem('engms_purchases_v1') || '[]'),
-      weeklyPlans: JSON.parse(localStorage.getItem('engms_weekly_plans_v1') || '[]'),
-      settings: loadSettings()
-    };
-    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'engms-backup-' + todayStr() + '.json';
-    a.click();
-    toast('已导出 JSON 备份', 'success');
+    fetch('/api/backup', { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'engms-backup-' + todayStr() + '.json';
+        a.click();
+        toast('已导出全库备份', 'success');
+      })
+      .catch(function () { toast('导出失败,请确认服务已启动', 'error'); });
   });
 
-  document.getElementById('stImport').addEventListener('click', function () {
+  /* 导入 - 解析 JSON 后调用 /api/restore */
+  document.getElementById('stImport').onclick = function () {
     var inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json';
     inp.onchange = function () {
       var f = inp.files[0]; if (!f) return;
@@ -102,31 +95,37 @@ async function initSettingsPage() {
       fr.onload = function (e) {
         try {
           var d = JSON.parse(e.target.result);
-          confirmDialog('确认恢复', '恢复将覆盖当前所有数据,是否继续?', function () {
-            if (d.members) localStorage.setItem('engms_members_v1', JSON.stringify(d.members));
-            if (d.projects) localStorage.setItem('engms_projects_v1', JSON.stringify(d.projects));
-            if (d.tasks) localStorage.setItem('engms_tasks_v1', JSON.stringify(d.tasks));
-            if (d.departments) localStorage.setItem('engms_departments_v1', JSON.stringify(d.departments));
-            if (d.roles) localStorage.setItem('engms_roles_v1', JSON.stringify(d.roles));
-            if (d.settings) localStorage.setItem('engms_settings_v1', JSON.stringify(d.settings));
-            toast('已恢复,请刷新页面查看', 'success');
+          confirmDialog('确认恢复', '将从备份文件覆盖当前数据库,是否继续?', function () {
+            fetch('/api/restore', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(d)
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (res) {
+                if (res.ok) {
+                  toast('已恢复,刷新页面查看', 'success');
+                  setTimeout(function () { location.reload(); }, 1000);
+                } else { toast('恢复失败', 'error'); }
+              })
+              .catch(function () { toast('恢复失败,请确认服务已启动', 'error'); });
           });
         } catch (e) { toast('文件解析失败', 'error'); }
       };
       fr.readAsText(f);
     };
     inp.click();
-  });
+  };
 
+  /* 清空 - POST /api/reset */
   document.getElementById('stReset').addEventListener('click', function () {
-    confirmDialog('清空全部数据', '此操作不可恢复,所有项目 / 任务 / 审批数据将被清空。继续?', function () {
-      ['members', 'projects', 'tasks'].forEach(function (k) {
-        localStorage.removeItem('engms_' + k + '_v1');
-      });
-      ['approvals', 'purchases', 'weeklyPlans', 'dailyPlans', 'departments', 'roles'].forEach(function (k) {
-        localStorage.removeItem('engms_' + k + '_v1');
-      });
-      toast('已清空,刷新页面查看', 'success');
+    confirmDialog('清空全部数据', '此操作不可恢复,所有业务数据将被清空。继续?', function () {
+      fetch('/api/reset', { method: 'POST', credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (res.ok) { toast('已清空,刷新页面查看', 'success'); setTimeout(function () { location.reload(); }, 1000); }
+        })
+        .catch(function () { toast('清空失败', 'error'); });
     });
   });
 }

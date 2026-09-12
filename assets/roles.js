@@ -1,5 +1,6 @@
 /* ============================================================
  * 用户角色 (W13) - 角色卡 + 9 个权限小方块
+ * 数据由 /api/roles 管理, 内存缓存见 common.js
  * ============================================================ */
 var PERMS = [
   { id: 'p_view',   label: '查看' },
@@ -13,22 +14,16 @@ var PERMS = [
   { id: 'p_admin',  label: '管理' }
 ];
 
-var ROLE_KEY = 'engms_roles_v1';
-function loadRoles() { try { return JSON.parse(localStorage.getItem(ROLE_KEY) || '[]'); } catch (e) { return []; } }
-function saveRoles(l) { localStorage.setItem(ROLE_KEY, JSON.stringify(l)); }
-
 async function initRolesPage() {
   var user = await requireLogin();
   if (!user) return;
   if (!isAdmin()) { toast('需要管理员权限', 'warn'); setTimeout(function(){ location.href='dashboard.html'; }, 800); return; }
 
   if (loadRoles().length === 0) {
-    saveRoles([
-      { _id: 'r_admin', name: '管理员', color: '#5865F2', desc: '系统全部权限', perms: PERMS.map(function (p) { return p.id; }) },
-      { _id: 'r_lead',  name: '工程主管', color: '#EC48BD', desc: '项目负责,审批管理', perms: ['p_view','p_create','p_edit','p_export','p_approve'] },
-      { _id: 'r_foreman',name: '工程班长', color: '#00B0F4', desc: '施工调度,任务分配', perms: ['p_view','p_create','p_edit','p_export'] },
-      { _id: 'r_worker', name: '综合维修工', color: '#35ED7E', desc: '日常报工', perms: ['p_view','p_sign'] }
-    ]);
+    createRole({ key: 'admin',   name: '管理员',     description: '系统全部权限', permissions: PERMS.map(function (p) { return p.id; }), sort_order: 1 });
+    createRole({ key: 'lead',    name: '工程主管',   description: '项目负责,审批管理', permissions: ['p_view','p_create','p_edit','p_export','p_approve'], sort_order: 2 });
+    createRole({ key: 'foreman', name: '工程班长',   description: '施工调度,任务分配', permissions: ['p_view','p_create','p_edit','p_export'], sort_order: 3 });
+    createRole({ key: 'worker',  name: '综合维修工', description: '日常报工',             permissions: ['p_view','p_sign'], sort_order: 4 });
   }
 
   var content = renderPage({
@@ -76,8 +71,8 @@ async function initRolesPage() {
       b.addEventListener('click', function () {
         var id = this.dataset.del;
         confirmDialog('删除角色', '确认删除该角色?', function () {
-          var l = loadRoles().filter(function (r) { return r._id !== id; });
-          saveRoles(l); paint();
+          deleteRole(id);
+          setTimeout(paint, 200);
         });
       });
     });
@@ -86,19 +81,19 @@ async function initRolesPage() {
   document.getElementById('rlNew').addEventListener('click', function () { openForm(null); });
 
   function openForm(rec) {
-    rec = rec || { name: '', desc: '', color: '#5865F2', perms: [] };
+    rec = rec || { name: '', description: '', permissions: [] };
     var html = '<div class="modal-backdrop" id="rlModal"><div class="modal" style="max-width:560px">' +
       '<div class="modal-head"><h3>' + (rec._id ? '编辑角色' : '添加角色') + '</h3>' +
       '<button class="modal-close" id="rlCancel">×</button></div>' +
       '<div class="modal-body"><div class="form-grid">' +
       '<div class="field-row"><label class="field-label"><span class="required">*</span>角色名称</label>' +
       '<input class="input" id="rlName" value="' + esc(rec.name) + '"></div>' +
-      '<div class="field-row"><label class="field-label">主题色</label>' +
-      '<input class="input" type="color" id="rlColor" value="' + esc(rec.color) + '" style="height:40px"></div>' +
+      '<div class="field-row"><label class="field-label">标识键</label>' +
+      '<input class="input" id="rlKey" value="' + esc(rec.key || '') + '" placeholder="英文唯一键"></div>' +
       '<div class="field-row full"><label class="field-label">角色说明</label>' +
-      '<textarea class="input" id="rlDesc" rows="2">' + esc(rec.desc || '') + '</textarea></div>' +
+      '<textarea class="input" id="rlDesc" rows="2">' + esc(rec.description || '') + '</textarea></div>' +
       '<div class="field-row full"><label class="field-label">权限配置</label>' +
-      paintPermGrid(rec.perms || []) + '</div>' +
+      paintPermGrid(rec.permissions || []) + '</div>' +
       '</div></div>' +
       '<div class="modal-foot"><button class="btn-ghost" id="rlCancel2">取消</button>' +
       '<button class="btn-success" id="rlSave">' + (rec._id ? '保存修改' : '添加') + '</button></div>' +
@@ -123,21 +118,19 @@ async function initRolesPage() {
       document.querySelectorAll('#rlModal .perm-cell').forEach(function (c) {
         if (c.querySelector('input').checked) perms.push(c.dataset.id);
       });
-      var l = loadRoles();
+      var patch = {
+        name: name,
+        key: document.getElementById('rlKey').value.trim(),
+        description: document.getElementById('rlDesc').value,
+        permissions: perms,
+      };
       if (rec._id) {
-        var i = l.findIndex(function (x) { return x._id === rec._id; });
-        l[i].name = name;
-        l[i].desc = document.getElementById('rlDesc').value;
-        l[i].color = document.getElementById('rlColor').value;
-        l[i].perms = perms;
+        updateRole(rec._id, patch);
       } else {
-        l.unshift({ _id: 'r_' + uuid().substring(0, 8), name: name,
-          desc: document.getElementById('rlDesc').value,
-          color: document.getElementById('rlColor').value,
-          perms: perms });
+        createRole(patch);
       }
-      saveRoles(l);
-      closeModal(); paint();
+      closeModal();
+      setTimeout(paint, 200);
       toast('已保存', 'success');
     };
   }

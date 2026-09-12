@@ -95,6 +95,109 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS daily_plans (
+  id TEXT PRIMARY KEY,
+  date TEXT DEFAULT '',
+  plan_date TEXT DEFAULT '',
+  status TEXT DEFAULT 'draft',
+  tasks_json TEXT DEFAULT '[]',
+  crew_json TEXT DEFAULT '{"night":[],"rest":[],"adjust":[]}',
+  remarks TEXT DEFAULT '',
+  submitter TEXT DEFAULT '',
+  submitted_at TEXT DEFAULT '',
+  approver TEXT DEFAULT '',
+  approved_at TEXT DEFAULT '',
+  rejected_at TEXT DEFAULT '',
+  rejected_reason TEXT DEFAULT '',
+  reviewed_by TEXT DEFAULT '',
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS weekly_plans (
+  id TEXT PRIMARY KEY,
+  week_start TEXT DEFAULT '',
+  week_end TEXT DEFAULT '',
+  title TEXT DEFAULT '',
+  status TEXT DEFAULT 'draft',
+  content TEXT DEFAULT '',
+  members_json TEXT DEFAULT '[]',
+  submitter TEXT DEFAULT '',
+  submitted_at TEXT DEFAULT '',
+  approver TEXT DEFAULT '',
+  approved_at TEXT DEFAULT '',
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS weekly_reports (
+  id TEXT PRIMARY KEY,
+  week_start TEXT DEFAULT '',
+  week_end TEXT DEFAULT '',
+  title TEXT DEFAULT '',
+  status TEXT DEFAULT 'draft',
+  summary TEXT DEFAULT '',
+  items_json TEXT DEFAULT '[]',
+  submitter TEXT DEFAULT '',
+  submitted_at TEXT DEFAULT '',
+  approver TEXT DEFAULT '',
+  approved_at TEXT DEFAULT '',
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS purchases (
+  id TEXT PRIMARY KEY,
+  date TEXT DEFAULT '',
+  name TEXT DEFAULT '',
+  spec TEXT DEFAULT '',
+  unit TEXT DEFAULT '',
+  qty TEXT DEFAULT '',
+  reason TEXT DEFAULT '',
+  status TEXT DEFAULT 'draft',
+  applicant TEXT DEFAULT '',
+  approver TEXT DEFAULT '',
+  approved_at TEXT DEFAULT '',
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS approvals (
+  id TEXT PRIMARY KEY,
+  type TEXT DEFAULT 'generic',
+  ref_id TEXT DEFAULT '',
+  title TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  applicant TEXT DEFAULT '',
+  approver TEXT DEFAULT '',
+  reason TEXT DEFAULT '',
+  payload_json TEXT DEFAULT '{}',
+  decided_at TEXT DEFAULT '',
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS departments (
+  id TEXT PRIMARY KEY,
+  name TEXT DEFAULT '',
+  code TEXT DEFAULT '',
+  parent_id TEXT DEFAULT '',
+  manager_id TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS roles (
+  id TEXT PRIMARY KEY,
+  key TEXT DEFAULT '',
+  name TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  permissions_json TEXT DEFAULT '[]',
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value_json TEXT DEFAULT '{}',
+  updated_at TEXT DEFAULT ''
+);
 """
 
 
@@ -166,6 +269,94 @@ def row_to_report(r):
         'submitted_at': r['submitted_at'], 'signed_at': r['signed_at'],
         'rejected_at': r['rejected_at'],
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def row_to_daily_plan(r):
+    return {
+        '_id': r['id'], 'date': r['date'], 'plan_date': r['plan_date'],
+        'status': r['status'],
+        'tasks': json.loads(r['tasks_json'] or '[]'),
+        'crew': json.loads(r['crew_json'] or '{"night":[],"rest":[],"adjust":[]}'),
+        'remarks': r['remarks'], 'submitter': r['submitter'],
+        'submitted_at': r['submitted_at'], 'approver': r['approver'],
+        'approved_at': r['approved_at'], 'rejected_at': r['rejected_at'],
+        'rejected_reason': r['rejected_reason'], 'reviewed_by': r['reviewed_by'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def row_to_weekly_plan(r):
+    return {
+        '_id': r['id'], 'week_start': r['week_start'], 'week_end': r['week_end'],
+        'title': r['title'], 'status': r['status'],
+        'content': r['content'],
+        'members': json.loads(r['members_json'] or '[]'),
+        'submitter': r['submitter'], 'submitted_at': r['submitted_at'],
+        'approver': r['approver'], 'approved_at': r['approved_at'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def row_to_weekly_report(r):
+    return {
+        '_id': r['id'], 'week_start': r['week_start'], 'week_end': r['week_end'],
+        'title': r['title'], 'status': r['status'],
+        'summary': r['summary'],
+        'items': json.loads(r['items_json'] or '[]'),
+        'submitter': r['submitter'], 'submitted_at': r['submitted_at'],
+        'approver': r['approver'], 'approved_at': r['approved_at'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def row_to_purchase(r):
+    return {
+        '_id': r['id'], 'date': r['date'], 'name': r['name'],
+        'spec': r['spec'], 'unit': r['unit'], 'qty': r['qty'],
+        'reason': r['reason'], 'status': r['status'],
+        'applicant': r['applicant'], 'approver': r['approver'],
+        'approved_at': r['approved_at'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def row_to_approval(r):
+    return {
+        '_id': r['id'], 'type': r['type'], 'ref_id': r['ref_id'],
+        'title': r['title'], 'status': r['status'],
+        'applicant': r['applicant'], 'approver': r['approver'],
+        'reason': r['reason'],
+        'payload': json.loads(r['payload_json'] or '{}'),
+        'decided_at': r['decided_at'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def row_to_department(r):
+    return {
+        '_id': r['id'], 'name': r['name'], 'code': r['code'],
+        'parent_id': r['parent_id'], 'manager_id': r['manager_id'],
+        'description': r['description'], 'sort_order': r['sort_order'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def row_to_role(r):
+    return {
+        '_id': r['id'], 'key': r['key'], 'name': r['name'],
+        'description': r['description'],
+        'permissions': json.loads(r['permissions_json'] or '[]'),
+        'sort_order': r['sort_order'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def row_to_setting(r):
+    return {
+        'key': r['key'],
+        'value': json.loads(r['value_json'] or '{}'),
+        'updated_at': r['updated_at'],
     }
 
 
@@ -279,6 +470,38 @@ def list_projects(conn):
 
 def list_tasks(conn):
     return [row_to_task(r) for r in conn.execute('SELECT * FROM tasks ORDER BY created_at').fetchall()]
+
+
+def list_daily_plans(conn):
+    return [row_to_daily_plan(r) for r in conn.execute('SELECT * FROM daily_plans ORDER BY date DESC, created_at DESC').fetchall()]
+
+
+def list_weekly_plans(conn):
+    return [row_to_weekly_plan(r) for r in conn.execute('SELECT * FROM weekly_plans ORDER BY week_start DESC, created_at DESC').fetchall()]
+
+
+def list_weekly_reports(conn):
+    return [row_to_weekly_report(r) for r in conn.execute('SELECT * FROM weekly_reports ORDER BY week_start DESC, created_at DESC').fetchall()]
+
+
+def list_purchases(conn):
+    return [row_to_purchase(r) for r in conn.execute('SELECT * FROM purchases ORDER BY date DESC, created_at DESC').fetchall()]
+
+
+def list_approvals(conn):
+    return [row_to_approval(r) for r in conn.execute('SELECT * FROM approvals ORDER BY created_at DESC').fetchall()]
+
+
+def list_departments(conn):
+    return [row_to_department(r) for r in conn.execute('SELECT * FROM departments ORDER BY sort_order, name').fetchall()]
+
+
+def list_roles(conn):
+    return [row_to_role(r) for r in conn.execute('SELECT * FROM roles ORDER BY sort_order, name').fetchall()]
+
+
+def list_settings(conn):
+    return {r['key']: json.loads(r['value_json'] or '{}') for r in conn.execute('SELECT * FROM settings').fetchall()}
 
 
 def upsert_member(conn, data):
@@ -434,6 +657,176 @@ def upsert_report(conn, data, uid):
     return rid
 
 
+# ---- daily_plans ----
+def upsert_daily_plan(conn, data):
+    did = data.get('_id') or gen_id('dp')
+    now = now_iso()
+    fields = (data.get('date', ''), data.get('plan_date', '') or data.get('date', ''),
+              data.get('status', 'draft'),
+              json.dumps(data.get('tasks', []), ensure_ascii=False),
+              json.dumps(data.get('crew', {'night':[], 'rest':[], 'adjust':[]}), ensure_ascii=False),
+              data.get('remarks', ''), data.get('submitter', ''),
+              data.get('submitted_at', ''), data.get('approver', ''),
+              data.get('approved_at', ''), data.get('rejected_at', ''),
+              data.get('rejected_reason', ''), data.get('reviewed_by', ''))
+    old = conn.execute('SELECT id FROM daily_plans WHERE id=?', (did,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE daily_plans SET date=?,plan_date=?,status=?,tasks_json=?,crew_json=?,remarks=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,updated_at=? WHERE id=?',
+            fields + (now, did))
+    else:
+        conn.execute(
+            'INSERT INTO daily_plans (id,date,plan_date,status,tasks_json,crew_json,remarks,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (did,) + fields + (data.get('created_at') or now, now))
+    conn.commit()
+    return did
+
+
+# ---- weekly_plans ----
+def upsert_weekly_plan(conn, data):
+    wid = data.get('_id') or gen_id('wp')
+    now = now_iso()
+    fields = (data.get('week_start', ''), data.get('week_end', ''),
+              data.get('title', ''), data.get('status', 'draft'),
+              data.get('content', ''),
+              json.dumps(data.get('members', []), ensure_ascii=False),
+              data.get('submitter', ''), data.get('submitted_at', ''),
+              data.get('approver', ''), data.get('approved_at', ''))
+    old = conn.execute('SELECT id FROM weekly_plans WHERE id=?', (wid,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE weekly_plans SET week_start=?,week_end=?,title=?,status=?,content=?,members_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
+            fields + (now, wid))
+    else:
+        conn.execute(
+            'INSERT INTO weekly_plans (id,week_start,week_end,title,status,content,members_json,submitter,submitted_at,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (wid,) + fields + (data.get('created_at') or now, now))
+    conn.commit()
+    return wid
+
+
+# ---- weekly_reports ----
+def upsert_weekly_report(conn, data):
+    wid = data.get('_id') or gen_id('wr')
+    now = now_iso()
+    fields = (data.get('week_start', ''), data.get('week_end', ''),
+              data.get('title', ''), data.get('status', 'draft'),
+              data.get('summary', ''),
+              json.dumps(data.get('items', []), ensure_ascii=False),
+              data.get('submitter', ''), data.get('submitted_at', ''),
+              data.get('approver', ''), data.get('approved_at', ''))
+    old = conn.execute('SELECT id FROM weekly_reports WHERE id=?', (wid,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE weekly_reports SET week_start=?,week_end=?,title=?,status=?,summary=?,items_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
+            fields + (now, wid))
+    else:
+        conn.execute(
+            'INSERT INTO weekly_reports (id,week_start,week_end,title,status,summary,items_json,submitter,submitted_at,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (wid,) + fields + (data.get('created_at') or now, now))
+    conn.commit()
+    return wid
+
+
+# ---- purchases ----
+def upsert_purchase(conn, data):
+    pid = data.get('_id') or gen_id('pu')
+    now = now_iso()
+    fields = (data.get('date', ''), data.get('name', ''),
+              data.get('spec', ''), data.get('unit', ''),
+              data.get('qty', ''), data.get('reason', ''),
+              data.get('status', 'draft'),
+              data.get('applicant', ''), data.get('approver', ''),
+              data.get('approved_at', ''))
+    old = conn.execute('SELECT id FROM purchases WHERE id=?', (pid,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE purchases SET date=?,name=?,spec=?,unit=?,qty=?,reason=?,status=?,applicant=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
+            fields + (now, pid))
+    else:
+        conn.execute(
+            'INSERT INTO purchases (id,date,name,spec,unit,qty,reason,status,applicant,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            (pid,) + fields + (data.get('created_at') or now, now))
+    conn.commit()
+    return pid
+
+
+# ---- approvals ----
+def upsert_approval(conn, data):
+    aid = data.get('_id') or gen_id('ap')
+    now = now_iso()
+    fields = (data.get('type', 'generic'), data.get('ref_id', ''),
+              data.get('title', ''), data.get('status', 'pending'),
+              data.get('applicant', ''), data.get('approver', ''),
+              data.get('reason', ''),
+              json.dumps(data.get('payload', {}), ensure_ascii=False),
+              data.get('decided_at', ''))
+    old = conn.execute('SELECT id FROM approvals WHERE id=?', (aid,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE approvals SET type=?,ref_id=?,title=?,status=?,applicant=?,approver=?,reason=?,payload_json=?,decided_at=?,updated_at=? WHERE id=?',
+            fields + (now, aid))
+    else:
+        conn.execute(
+            'INSERT INTO approvals (id,type,ref_id,title,status,applicant,approver,reason,payload_json,decided_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+            (aid,) + fields + (data.get('created_at') or now, now))
+    conn.commit()
+    return aid
+
+
+# ---- departments ----
+def upsert_department(conn, data):
+    did = data.get('_id') or gen_id('d')
+    now = now_iso()
+    fields = (data.get('name', ''), data.get('code', ''),
+              data.get('parent_id', ''), data.get('manager_id', ''),
+              data.get('description', ''), int(data.get('sort_order', 0) or 0))
+    old = conn.execute('SELECT id FROM departments WHERE id=?', (did,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE departments SET name=?,code=?,parent_id=?,manager_id=?,description=?,sort_order=?,updated_at=? WHERE id=?',
+            fields + (now, did))
+    else:
+        conn.execute(
+            'INSERT INTO departments (id,name,code,parent_id,manager_id,description,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+            (did,) + fields + (data.get('created_at') or now, now))
+    conn.commit()
+    return did
+
+
+# ---- roles ----
+def upsert_role(conn, data):
+    rid = data.get('_id') or gen_id('r')
+    now = now_iso()
+    fields = (data.get('key', ''), data.get('name', ''),
+              data.get('description', ''),
+              json.dumps(data.get('permissions', []), ensure_ascii=False),
+              int(data.get('sort_order', 0) or 0))
+    old = conn.execute('SELECT id FROM roles WHERE id=?', (rid,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE roles SET key=?,name=?,description=?,permissions_json=?,sort_order=?,updated_at=? WHERE id=?',
+            fields + (now, rid))
+    else:
+        conn.execute(
+            'INSERT INTO roles (id,key,name,description,permissions_json,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+            (rid,) + fields + (data.get('created_at') or now, now))
+    conn.commit()
+    return rid
+
+
+# ---- settings (KV) ----
+def upsert_setting(conn, key, value):
+    now = now_iso()
+    json_val = json.dumps(value, ensure_ascii=False)
+    old = conn.execute('SELECT key FROM settings WHERE key=?', (key,)).fetchone()
+    if old:
+        conn.execute('UPDATE settings SET value_json=?,updated_at=? WHERE key=?', (json_val, now, key))
+    else:
+        conn.execute('INSERT INTO settings (key,value_json,updated_at) VALUES (?,?,?)', (key, json_val, now))
+    conn.commit()
+
+
 # ============================================================
 # HTTP 服务
 # ============================================================
@@ -570,6 +963,15 @@ class Handler(BaseHTTPRequestHandler):
                     'members': list_members(conn),
                     'projects': list_projects(conn),
                     'tasks': list_tasks(conn),
+                    'reports': [row_to_report(r) for r in conn.execute('SELECT * FROM reports').fetchall()],
+                    'daily_plans': list_daily_plans(conn),
+                    'weekly_plans': list_weekly_plans(conn),
+                    'weekly_reports': list_weekly_reports(conn),
+                    'purchases': list_purchases(conn),
+                    'approvals': list_approvals(conn),
+                    'departments': list_departments(conn),
+                    'roles': list_roles(conn),
+                    'settings': list_settings(conn),
                 }
             conn.close()
             return self._json(data)
@@ -739,6 +1141,138 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 return self._json({'ok': True})
 
+        # ---- 通用 CRUD 路由工厂 (8 类业务数据) ----
+        # 路径 -> (表名, row_to_X, upsert_X, list_X, gen_prefix)
+        REST_RULES = {
+            '/api/daily-plans':   ('daily_plans',   row_to_daily_plan,   upsert_daily_plan,   list_daily_plans,   'dp'),
+            '/api/weekly-plans':  ('weekly_plans',  row_to_weekly_plan,  upsert_weekly_plan,  list_weekly_plans,  'wp'),
+            '/api/weekly-reports':('weekly_reports',row_to_weekly_report,upsert_weekly_report,list_weekly_reports,'wr'),
+            '/api/purchases':     ('purchases',     row_to_purchase,     upsert_purchase,     list_purchases,     'pu'),
+            '/api/approvals':     ('approvals',     row_to_approval,     upsert_approval,     list_approvals,     'ap'),
+            '/api/departments':   ('departments',   row_to_department,   upsert_department,   list_departments,   'd'),
+            '/api/roles':         ('roles',         row_to_role,         upsert_role,         list_roles,         'r'),
+        }
+
+        # 列表 / 创建
+        for list_path, (table, to_row, upsert_fn, list_fn, prefix) in REST_RULES.items():
+            if path == list_path:
+                if method == 'GET':
+                    page = max(1, int((qs.get('page') or ['1'])[0]))
+                    page_size = max(1, min(100, int((qs.get('pageSize') or ['100'])[0])))
+                    status_q = (qs.get('status') or [''])[0]
+                    kw = (qs.get('q') or [''])[0].strip()
+                    where, args = [], []
+                    if status_q:
+                        where.append('status=?'); args.append(status_q)
+                    if kw:
+                        # 跨文本字段搜索
+                        text_cols = {'daily_plans':'remarks','weekly_plans':'title||content','weekly_reports':'title||summary','purchases':'name||spec||reason','approvals':'title||reason','departments':'name||code||description','roles':'key||name||description'}
+                        col = text_cols.get(table, 'name')
+                        where.append('(' + col + ' LIKE ?)'); args.append('%' + kw + '%')
+                    wsql = ('WHERE ' + ' AND '.join(where)) if where else ''
+                    total = conn.execute('SELECT COUNT(*) c FROM ' + table + ' ' + wsql, args).fetchone()['c']
+                    rows = conn.execute(
+                        'SELECT * FROM ' + table + ' ' + wsql + ' LIMIT ? OFFSET ?',
+                        args + [page_size, (page - 1) * page_size]).fetchall()
+                    conn.close()
+                    return self._json({
+                        'items': [to_row(r) for r in rows],
+                        'total': total, 'page': page, 'pageSize': page_size,
+                    })
+                if method == 'POST':
+                    rid = upsert_fn(conn, body or {})
+                    r = conn.execute('SELECT * FROM ' + table + ' WHERE id=?', (rid,)).fetchone()
+                    conn.close()
+                    return self._json({'record': to_row(r)})
+
+        # 单条读 / 更新 / 删除
+        for list_path, (table, to_row, upsert_fn, list_fn, prefix) in REST_RULES.items():
+            m = re.match(r'^' + re.escape(list_path) + r'/([\w-]+)$', path)
+            if m:
+                rid = m.group(1)
+                if method == 'GET':
+                    r = conn.execute('SELECT * FROM ' + table + ' WHERE id=?', (rid,)).fetchone()
+                    conn.close()
+                    if not r: return self._error('记录不存在', 404)
+                    return self._json({'record': to_row(r)})
+                if method == 'PUT':
+                    r0 = conn.execute('SELECT * FROM ' + table + ' WHERE id=?', (rid,)).fetchone()
+                    if not r0:
+                        conn.close(); return self._error('记录不存在', 404)
+                    data = dict(to_row(r0))
+                    data.update(body or {})
+                    data['_id'] = rid
+                    upsert_fn(conn, data)
+                    r = conn.execute('SELECT * FROM ' + table + ' WHERE id=?', (rid,)).fetchone()
+                    conn.close()
+                    return self._json({'record': to_row(r)})
+                if method == 'DELETE':
+                    conn.execute('DELETE FROM ' + table + ' WHERE id=?', (rid,))
+                    conn.commit()
+                    conn.close()
+                    return self._json({'ok': True})
+
+        # ---- settings (KV) ----
+        if path == '/api/settings' and method == 'GET':
+            data = list_settings(conn)
+            conn.close()
+            return self._json({'items': data, 'keys': list(data.keys())})
+        if path == '/api/settings' and method == 'POST':
+            body = body or {}
+            key = body.get('key')
+            value = body.get('value', {})
+            if not key:
+                conn.close(); return self._error('缺少 key', 400)
+            upsert_setting(conn, key, value)
+            conn.close()
+            return self._json({'ok': True, 'key': key})
+        m = re.match(r'^/api/settings/([\w.-]+)$', path)
+        if m:
+            key = m.group(1)
+            if method == 'GET':
+                r = conn.execute('SELECT * FROM settings WHERE key=?', (key,)).fetchone()
+                conn.close()
+                if not r: return self._error('设置不存在', 404)
+                return self._json({'record': row_to_setting(r)})
+            if method == 'DELETE':
+                conn.execute('DELETE FROM settings WHERE key=?', (key,))
+                conn.commit()
+                conn.close()
+                return self._json({'ok': True})
+
+        # ---- 一键迁移 (localStorage -> DB) ----
+        if path == '/api/migrate' and method == 'POST':
+            with _lock:
+                body = body or {}
+                inserted = {}
+                for rec in body.get('daily_plans', []):
+                    upsert_daily_plan(conn, rec)
+                for rec in body.get('weekly_plans', []):
+                    upsert_weekly_plan(conn, rec)
+                for rec in body.get('weekly_reports', []):
+                    upsert_weekly_report(conn, rec)
+                for rec in body.get('purchases', []):
+                    upsert_purchase(conn, rec)
+                for rec in body.get('approvals', []):
+                    upsert_approval(conn, rec)
+                for rec in body.get('departments', []):
+                    upsert_department(conn, rec)
+                for rec in body.get('roles', []):
+                    upsert_role(conn, rec)
+                for k, v in (body.get('settings') or {}).items():
+                    upsert_setting(conn, k, v)
+                inserted = {
+                    'daily_plans': list_daily_plans(conn),
+                    'weekly_plans': list_weekly_plans(conn),
+                    'weekly_reports': list_weekly_reports(conn),
+                    'purchases': list_purchases(conn),
+                    'approvals': list_approvals(conn),
+                    'departments': list_departments(conn),
+                    'roles': list_roles(conn),
+                }
+            conn.close()
+            return self._json({'ok': True, 'inserted': {k: len(v) for k, v in inserted.items()}})
+
         # ---- 备份 / 恢复 / 清空 ----
         if path == '/api/backup' and method == 'GET':
             with _lock:
@@ -747,15 +1281,25 @@ class Handler(BaseHTTPRequestHandler):
                     'projects': list_projects(conn),
                     'tasks': list_tasks(conn),
                     'reports': [row_to_report(r) for r in conn.execute('SELECT * FROM reports').fetchall()],
+                    'daily_plans': list_daily_plans(conn),
+                    'weekly_plans': list_weekly_plans(conn),
+                    'weekly_reports': list_weekly_reports(conn),
+                    'purchases': list_purchases(conn),
+                    'approvals': list_approvals(conn),
+                    'departments': list_departments(conn),
+                    'roles': list_roles(conn),
+                    'settings': list_settings(conn),
                     'exported_at': now_iso(),
-                    'version': 'eng_ms_v2_db',
+                    'version': 'eng_ms_v3_db',
                 }
             conn.close()
             return self._json(data)
 
         if path == '/api/restore' and method == 'POST':
             with _lock:
-                for t in ('members', 'projects', 'tasks', 'reports'):
+                for t in ('members', 'projects', 'tasks', 'reports',
+                          'daily_plans', 'weekly_plans', 'weekly_reports',
+                          'purchases', 'approvals', 'departments', 'roles', 'settings'):
                     conn.execute('DELETE FROM ' + t)
                 for rec in body.get('members', []):
                     upsert_member(conn, rec)
@@ -765,12 +1309,30 @@ class Handler(BaseHTTPRequestHandler):
                     upsert_task(conn, rec)
                 for rec in body.get('reports', []):
                     upsert_report(conn, rec, uid)
+                for rec in body.get('daily_plans', []):
+                    upsert_daily_plan(conn, rec)
+                for rec in body.get('weekly_plans', []):
+                    upsert_weekly_plan(conn, rec)
+                for rec in body.get('weekly_reports', []):
+                    upsert_weekly_report(conn, rec)
+                for rec in body.get('purchases', []):
+                    upsert_purchase(conn, rec)
+                for rec in body.get('approvals', []):
+                    upsert_approval(conn, rec)
+                for rec in body.get('departments', []):
+                    upsert_department(conn, rec)
+                for rec in body.get('roles', []):
+                    upsert_role(conn, rec)
+                for k, v in (body.get('settings') or {}).items():
+                    upsert_setting(conn, k, v)
             conn.close()
             return self._json({'ok': True})
 
         if path == '/api/reset' and method == 'POST':
             with _lock:
-                for t in ('members', 'projects', 'tasks', 'reports'):
+                for t in ('members', 'projects', 'tasks', 'reports',
+                          'daily_plans', 'weekly_plans', 'weekly_reports',
+                          'purchases', 'approvals', 'departments', 'roles', 'settings'):
                     conn.execute('DELETE FROM ' + t)
             conn.commit()
             conn.close()

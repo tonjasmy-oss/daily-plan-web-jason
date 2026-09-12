@@ -18,7 +18,7 @@
  *   - 审批人 (admin/manager): pending 状态可审批(通过/驳回)
  *   - 班长/工人: 审批通过后只读查看
  *
- * 持久化: localStorage, 按 date 主键索引
+ * 持久化: 走 /api/daily-plans (server/app.py + SQLite), 内存缓存由 common.js 管理
  * 导出: 审批通过 (approved) 后才能导出 Excel
  * ============================================================ */
 
@@ -29,22 +29,17 @@ var DP_ALLOWED_ROLES = ['manager', 'worker'];
 /* 主管以上 (admin/manager) 才有审批权 */
 var DP_APPROVE_ROLES = ['admin', 'manager'];
 
-/* ---------- 数据持久化 ---------- */
-function loadDailyPlans() {
-  try { return JSON.parse(localStorage.getItem(DAILY_PLAN_KEY) || '[]'); }
-  catch (e) { return []; }
-}
-function saveDailyPlans(list) {
-  localStorage.setItem(DAILY_PLAN_KEY, JSON.stringify(list));
-}
+/* ---------- 数据持久化 (走 /api/daily-plans, 内存缓存由 common.js 管理) ---------- */
 function getDailyPlanByDate(date) {
   return loadDailyPlans().find(function (p) { return p.date === date; });
 }
 function upsertDailyPlan(rec) {
-  var list = loadDailyPlans();
-  var idx = list.findIndex(function (p) { return p.date === rec.date; });
-  if (idx >= 0) list[idx] = rec; else list.unshift(rec);
-  saveDailyPlans(list);
+  var existing = getDailyPlanByDate(rec.date);
+  if (existing) {
+    updateDailyPlan(existing._id, rec);
+  } else {
+    createDailyPlan(rec);
+  }
 }
 
 /* ---------- 表单初始化 ---------- */
@@ -256,10 +251,10 @@ async function initDailyPlanPage() {
   }
   function deleteRecord() {
     confirmDialog('确认删除', '删除后无法恢复,确定删除此日的日计划?', function () {
-      var list = loadDailyPlans().filter(function (p) { return p.date !== form.date; });
-      saveDailyPlans(list);
+      var existing = getDailyPlanByDate(form.date);
+      if (existing) deleteDailyPlan(existing._id);
       toast('已删除');
-      setTimeout(function () { location.reload(); }, 600);
+      setTimeout(function () { location.href = 'daily-plan.html'; }, 600);
     });
   }
 

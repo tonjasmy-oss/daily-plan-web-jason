@@ -21,16 +21,15 @@ async function initPlanBrowsePage() {
   var list = [];
   var emptyText = '';
   if (tab === 'daily') {
-    list = (JSON.parse(localStorage.getItem('engms_daily_plans_v1') || '[]'));
+    list = loadDailyPlans();
     emptyText = '尚无日计划填报';
   } else if (tab === 'weekly') {
-    list = (JSON.parse(localStorage.getItem('engms_weekly_plans_v1') || '[]'));
+    list = loadWeeklyPlans();
     emptyText = '尚无周计划填报';
   } else if (tab === 'monthly') {
     emptyText = '尚无计划月报';
   } else {
-    var reports = loadReports ? loadReports() : [];
-    list = reports;
+    list = loadReports();
     emptyText = '尚无日报记录';
   }
 
@@ -40,10 +39,10 @@ async function initPlanBrowsePage() {
     return;
   }
   host.innerHTML = list.map(function (rec) {
-    var title = rec.date || (rec.startDate || '');
+    var title = rec.date || (rec.week_start || '');
     var sub = '';
     if (tab === 'daily') sub = (rec.tasks || []).length + ' 项任务';
-    else if (tab === 'weekly') sub = (rec.tasks || []).length + ' 项 · ' + (rec.startDate || '') + ' ~ ' + (rec.endDate || '');
+    else if (tab === 'weekly') sub = (rec.title || '') + ' · ' + (rec.week_start || '') + ' ~ ' + (rec.week_end || '');
     else if (tab === 'report') sub = (rec.tasks || []).length + ' 项 · 状态 ' + (REPORT_STATUS_TEXT[rec.status] || rec.status || '-');
     return '<a class="list-row" href="dashboard.html">' +
       '<div><strong>' + esc(title) + '</strong><div class="muted" style="font-size:13px;margin-top:4px">' + esc(sub) + '</div></div>' +
@@ -51,8 +50,8 @@ async function initPlanBrowsePage() {
   }).join('');
 }
 function loadReports() {
-  /* 用 server API 缓存(目前仅前端 localStorage 简单支持) */
-  try { return JSON.parse(localStorage.getItem('engms_reports_v1') || '[]'); } catch (e) { return []; }
+  /* 通过 /api/reports 在 requireLogin/bootstrapDB 时已加载到 DB.reports */
+  return (typeof DB !== 'undefined' && DB.reports) ? DB.reports : [];
 }
 window.initPlanBrowsePage = initPlanBrowsePage;
 window.addEventListener('DOMContentLoaded', initPlanBrowsePage);

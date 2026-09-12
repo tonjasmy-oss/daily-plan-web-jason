@@ -1,9 +1,6 @@
-/* ============================================================
- * 审批管理 (W10) - 用户审批 / 表单审批 双 tab
- * ============================================================ */
-var APR_KEY = 'engms_approvals_v1';
-function loadApprovals() { try { return JSON.parse(localStorage.getItem(APR_KEY) || '[]'); } catch (e) { return []; } }
-function saveApprovals(l) { localStorage.setItem(APR_KEY, JSON.stringify(l)); }
+/* 审批管理 (W10) - 数据由 /api/approvals 管理
+ * 内存缓存见 common.js 的 loadApprovals/createApproval/updateApproval
+ */
 
 async function initApprovalPage() {
   var user = await requireLogin();
@@ -81,26 +78,22 @@ async function initApprovalPage() {
   }
 
   function decide(id, to, note) {
-    var l = loadApprovals();
-    var i = l.findIndex(function (x) { return x._id === id; });
-    if (i < 0) return;
-    l[i].status = to;
-    l[i].decidedAt = new Date().toISOString();
-    l[i].decidedBy = user._id;
-    if (note) l[i].rejectReason = note;
-    saveApprovals(l);
+    var patch = {
+      status: to,
+      approver: user.name || '',
+      decided_at: new Date().toISOString(),
+    };
+    if (note) patch.reason = note;
+    updateApproval(id, patch);  /* 走 /api/approvals/:id */
     toast(to === 'approved' ? '已通过' : '已驳回', 'success');
-    paint();
+    setTimeout(paint, 200);
   }
 
-  /* 首次启动:加入示例审批(可选) */
-  var existing = loadApprovals();
-  if (existing.length === 0) {
-    saveApprovals([
-      { _id: 'apr_' + uuid().substring(0, 8), type: 'user', title: '新增人员 - 陈工', applicant: '张工', status: 'pending', created_at: new Date(Date.now() - 3600e3).toISOString(), remark: '电工,需补全入队手续' },
-      { _id: 'apr_' + uuid().substring(0, 8), type: 'form', title: '日常日报 2026-09-10', applicant: '李师傅', status: 'pending', created_at: new Date(Date.now() - 7200e3).toISOString(), remark: '3 层模板支撑完成 60%,申请验收' },
-      { _id: 'apr_' + uuid().substring(0, 8), type: 'form', title: '周计划 第 37 周', applicant: '张工', status: 'approved', created_at: new Date(Date.now() - 86400e3).toISOString(), decidedAt: new Date(Date.now() - 80000e3).toISOString() }
-    ]);
+  /* 首次启动:加入示例审批(可选) - 仅在内存缓存为空时创建 */
+  if (loadApprovals().length === 0) {
+    createApproval({ type: 'user', title: '新增人员 - 陈工', applicant: '张工', status: 'pending', payload: {}, reason: '电工,需补全入队手续' });
+    createApproval({ type: 'form', title: '日常日报 2026-09-10', applicant: '李师傅', status: 'pending', payload: {}, reason: '3 层模板支撑完成 60%,申请验收' });
+    createApproval({ type: 'form', title: '周计划 第 37 周', applicant: '张工', status: 'approved', payload: {}, decided_at: new Date(Date.now() - 80000e3).toISOString() });
   }
   paint();
 

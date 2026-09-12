@@ -11,7 +11,13 @@ var STORAGE_KEYS = {
 };
 
 /* ===== 内存数据缓存 ===== */
-var DB = { members: [], projects: [], tasks: [], loaded: false, _loading: null };
+var DB = {
+  members: [], projects: [], tasks: [], reports: [],
+  dailyPlans: [], weeklyPlans: [], weeklyReports: [],
+  purchases: [], approvals: [], departments: [], roles: [],
+  settings: {},
+  loaded: false, _loading: null
+};
 
 /* ===== 角色 (沿用旧名以免破坏现有 JS 调用) ===== */
 var ROLE = {
@@ -203,6 +209,15 @@ function bootstrapDB() {
       DB.members = res.members || [];
       DB.projects = res.projects || [];
       DB.tasks = res.tasks || [];
+      DB.reports = res.reports || [];
+      DB.dailyPlans = res.daily_plans || [];
+      DB.weeklyPlans = res.weekly_plans || [];
+      DB.weeklyReports = res.weekly_reports || [];
+      DB.purchases = res.purchases || [];
+      DB.approvals = res.approvals || [];
+      DB.departments = res.departments || [];
+      DB.roles = res.roles || [];
+      DB.settings = res.settings || {};
       DB.loaded = true;
       DB._loading = null;
     })
@@ -434,6 +449,222 @@ function requireLogin() {
     }
     return u;
   }).catch(function () { return null; });
+}
+
+/* ============================================================
+ * 日计划填报 CRUD (走 /api/daily-plans)
+ * ============================================================ */
+function loadDailyPlans() { return DB.dailyPlans; }
+function getDailyPlan(id) { return _findById(DB.dailyPlans, id); }
+function createDailyPlan(data) {
+  var rec = Object.assign({
+    _id: 'dp_' + uuid(),
+    date: todayStr(), plan_date: todayStr(),
+    status: 'draft', tasks: [], crew: { night: [], rest: [], adjust: [] },
+    remarks: '', submitter: '', approver: '',
+    created_at: new Date().toISOString()
+  }, data);
+  rec._id = rec._id || ('dp_' + uuid());
+  DB.dailyPlans.unshift(rec);
+  _syncNow('POST', '/api/daily-plans', rec);
+  return rec;
+}
+function updateDailyPlan(id, patch) {
+  var idx = _findIdx(DB.dailyPlans, id);
+  if (idx < 0) return null;
+  DB.dailyPlans[idx] = Object.assign({}, DB.dailyPlans[idx], patch, { updated_at: new Date().toISOString() });
+  _syncRecord('PUT', '/api/daily-plans/' + id, DB.dailyPlans[idx]);
+  return DB.dailyPlans[idx];
+}
+function deleteDailyPlan(id) {
+  DB.dailyPlans = DB.dailyPlans.filter(function (r) { return r._id !== id; });
+  _syncNow('DELETE', '/api/daily-plans/' + id);
+}
+
+/* ===== 周计划填报 CRUD ===== */
+function loadWeeklyPlans() { return DB.weeklyPlans; }
+function createWeeklyPlan(data) {
+  var rec = Object.assign({
+    _id: 'wp_' + uuid(),
+    week_start: '', week_end: '', title: '',
+    status: 'draft', content: '', members: [],
+    submitter: '', approver: '',
+    created_at: new Date().toISOString()
+  }, data);
+  DB.weeklyPlans.unshift(rec);
+  _syncNow('POST', '/api/weekly-plans', rec);
+  return rec;
+}
+function updateWeeklyPlan(id, patch) {
+  var idx = _findIdx(DB.weeklyPlans, id);
+  if (idx < 0) return null;
+  DB.weeklyPlans[idx] = Object.assign({}, DB.weeklyPlans[idx], patch, { updated_at: new Date().toISOString() });
+  _syncRecord('PUT', '/api/weekly-plans/' + id, DB.weeklyPlans[idx]);
+  return DB.weeklyPlans[idx];
+}
+function deleteWeeklyPlan(id) {
+  DB.weeklyPlans = DB.weeklyPlans.filter(function (r) { return r._id !== id; });
+  _syncNow('DELETE', '/api/weekly-plans/' + id);
+}
+
+/* ===== 计划周报 CRUD ===== */
+function loadWeeklyReports() { return DB.weeklyReports; }
+function createWeeklyReport(data) {
+  var rec = Object.assign({
+    _id: 'wr_' + uuid(),
+    week_start: '', week_end: '', title: '',
+    status: 'draft', summary: '', items: [],
+    submitter: '', approver: '',
+    created_at: new Date().toISOString()
+  }, data);
+  DB.weeklyReports.unshift(rec);
+  _syncNow('POST', '/api/weekly-reports', rec);
+  return rec;
+}
+function updateWeeklyReport(id, patch) {
+  var idx = _findIdx(DB.weeklyReports, id);
+  if (idx < 0) return null;
+  DB.weeklyReports[idx] = Object.assign({}, DB.weeklyReports[idx], patch, { updated_at: new Date().toISOString() });
+  _syncRecord('PUT', '/api/weekly-reports/' + id, DB.weeklyReports[idx]);
+  return DB.weeklyReports[idx];
+}
+function deleteWeeklyReport(id) {
+  DB.weeklyReports = DB.weeklyReports.filter(function (r) { return r._id !== id; });
+  _syncNow('DELETE', '/api/weekly-reports/' + id);
+}
+
+/* ===== 物资申购 CRUD ===== */
+function loadPurchases() { return DB.purchases; }
+function createPurchase(data) {
+  var rec = Object.assign({
+    _id: 'pu_' + uuid(),
+    date: todayStr(), name: '', spec: '', unit: '', qty: '',
+    reason: '', status: 'draft',
+    applicant: '', approver: '',
+    created_at: new Date().toISOString()
+  }, data);
+  DB.purchases.unshift(rec);
+  _syncNow('POST', '/api/purchases', rec);
+  return rec;
+}
+function updatePurchase(id, patch) {
+  var idx = _findIdx(DB.purchases, id);
+  if (idx < 0) return null;
+  DB.purchases[idx] = Object.assign({}, DB.purchases[idx], patch, { updated_at: new Date().toISOString() });
+  _syncRecord('PUT', '/api/purchases/' + id, DB.purchases[idx]);
+  return DB.purchases[idx];
+}
+function deletePurchase(id) {
+  DB.purchases = DB.purchases.filter(function (r) { return r._id !== id; });
+  _syncNow('DELETE', '/api/purchases/' + id);
+}
+
+/* ===== 审批管理 CRUD ===== */
+function loadApprovals() { return DB.approvals; }
+function createApproval(data) {
+  var rec = Object.assign({
+    _id: 'ap_' + uuid(),
+    type: 'generic', ref_id: '', title: '',
+    status: 'pending', applicant: '', approver: '',
+    reason: '', payload: {},
+    created_at: new Date().toISOString()
+  }, data);
+  DB.approvals.unshift(rec);
+  _syncNow('POST', '/api/approvals', rec);
+  return rec;
+}
+function updateApproval(id, patch) {
+  var idx = _findIdx(DB.approvals, id);
+  if (idx < 0) return null;
+  DB.approvals[idx] = Object.assign({}, DB.approvals[idx], patch, { updated_at: new Date().toISOString() });
+  _syncRecord('PUT', '/api/approvals/' + id, DB.approvals[idx]);
+  return DB.approvals[idx];
+}
+function deleteApproval(id) {
+  DB.approvals = DB.approvals.filter(function (r) { return r._id !== id; });
+  _syncNow('DELETE', '/api/approvals/' + id);
+}
+
+/* ===== 部门管理 CRUD ===== */
+function loadDepartments() { return DB.departments; }
+function createDepartment(data) {
+  var rec = Object.assign({
+    _id: 'd_' + uuid(),
+    name: '', code: '', parent_id: '', manager_id: '',
+    description: '', sort_order: 0,
+    created_at: new Date().toISOString()
+  }, data);
+  DB.departments.push(rec);
+  _syncNow('POST', '/api/departments', rec);
+  return rec;
+}
+function updateDepartment(id, patch) {
+  var idx = _findIdx(DB.departments, id);
+  if (idx < 0) return null;
+  DB.departments[idx] = Object.assign({}, DB.departments[idx], patch, { updated_at: new Date().toISOString() });
+  _syncRecord('PUT', '/api/departments/' + id, DB.departments[idx]);
+  return DB.departments[idx];
+}
+function deleteDepartment(id) {
+  DB.departments = DB.departments.filter(function (r) { return r._id !== id; });
+  _syncNow('DELETE', '/api/departments/' + id);
+}
+
+/* ===== 角色权限 CRUD ===== */
+function loadRoles() { return DB.roles; }
+function createRole(data) {
+  var rec = Object.assign({
+    _id: 'r_' + uuid(),
+    key: '', name: '', description: '',
+    permissions: [], sort_order: 0,
+    created_at: new Date().toISOString()
+  }, data);
+  DB.roles.push(rec);
+  _syncNow('POST', '/api/roles', rec);
+  return rec;
+}
+function updateRole(id, patch) {
+  var idx = _findIdx(DB.roles, id);
+  if (idx < 0) return null;
+  DB.roles[idx] = Object.assign({}, DB.roles[idx], patch, { updated_at: new Date().toISOString() });
+  _syncRecord('PUT', '/api/roles/' + id, DB.roles[idx]);
+  return DB.roles[idx];
+}
+function deleteRole(id) {
+  DB.roles = DB.roles.filter(function (r) { return r._id !== id; });
+  _syncNow('DELETE', '/api/roles/' + id);
+}
+
+/* ===== 系统参数 (KV) ===== */
+function getSetting(key, defaultValue) {
+  return DB.settings[key] !== undefined ? DB.settings[key] : defaultValue;
+}
+function setSetting(key, value) {
+  DB.settings[key] = value;
+  _syncNow('POST', '/api/settings', { key: key, value: value });
+}
+
+/* ===== 一键迁移 localStorage -> 服务端 ===== */
+function migrateLocalStorageToServer() {
+  var payload = {};
+  ['daily_plans', 'weekly_plans', 'weekly_reports', 'purchases',
+   'approvals', 'departments', 'roles'].forEach(function (k) {
+    try {
+      var raw = localStorage.getItem('engms_' + k + '_v1');
+      if (raw) payload[k] = JSON.parse(raw);
+    } catch (e) {}
+  });
+  try {
+    var settingsRaw = localStorage.getItem('engms_settings_v1');
+    if (settingsRaw) payload.settings = JSON.parse(settingsRaw);
+  } catch (e) {}
+
+  if (Object.keys(payload).length === 0) return Promise.resolve({ ok: true, migrated: 0 });
+  return fetch('/api/migrate', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function (r) { return r.json(); });
 }
 
 function isAdmin() {

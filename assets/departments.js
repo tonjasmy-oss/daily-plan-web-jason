@@ -1,22 +1,18 @@
 /* ============================================================
  * 部门管理 (W12) - 添加部门 + 部门列表
+ * 数据由 /api/departments 管理, 内存缓存见 common.js
  * ============================================================ */
-var DEPT_KEY = 'engms_departments_v1';
-function loadDepts() { try { return JSON.parse(localStorage.getItem(DEPT_KEY) || '[]'); } catch (e) { return []; } }
-function saveDepts(l) { localStorage.setItem(DEPT_KEY, JSON.stringify(l)); }
 
 async function initDepartmentsPage() {
   var user = await requireLogin();
   if (!user) return;
   if (!isAdmin()) { toast('需要管理员权限', 'warn'); setTimeout(function(){ location.href='dashboard.html'; }, 800); return; }
 
-  /* 默认种子 */
-  if (loadDepts().length === 0) {
-    saveDepts([
-      { _id: 'd1', name: '工程部', desc: '负责项目现场施工', headcount: 12, created_at: new Date().toISOString() },
-      { _id: 'd2', name: '秩序部', desc: '现场秩序与安全', headcount: 4, created_at: new Date().toISOString() },
-      { _id: 'd3', name: '管理部', desc: '后勤与综合管理', headcount: 6, created_at: new Date().toISOString() }
-    ]);
+  /* 默认种子 - 仅在服务端无数据时插入 */
+  if (loadDepartments().length === 0) {
+    createDepartment({ name: '工程部', code: 'ENG', description: '负责项目现场施工', sort_order: 1 });
+    createDepartment({ name: '秩序部', code: 'ORD', description: '现场秩序与安全', sort_order: 2 });
+    createDepartment({ name: '管理部', code: 'ADM', description: '后勤与综合管理', sort_order: 3 });
   }
 
   var content = renderPage({
@@ -29,18 +25,17 @@ async function initDepartmentsPage() {
   });
 
   function paint() {
-    var list = loadDepts();
+    var list = loadDepartments();
     var host = document.getElementById('dList');
     if (list.length === 0) { renderEmpty(host, '暂无部门'); return; }
     host.innerHTML = '<div class="section" style="padding:6px"><table class="table" style="width:100%">' +
-      '<thead><tr><th style="width:80px">编号</th><th>部门名称</th><th>说明</th><th style="width:120px">编制人数</th><th style="width:160px">创建时间</th><th style="width:160px">操作</th></tr></thead><tbody>' +
+      '<thead><tr><th style="width:80px">编号</th><th>部门名称</th><th>编码</th><th>说明</th><th style="width:160px">创建时间</th><th style="width:160px">操作</th></tr></thead><tbody>' +
       list.map(function (d, i) {
-        var members = loadMembers().filter(function (m) { return (m.deptId === d._id || m.department === d.name); }).length;
         return '<tr>' +
           '<td><span class="task-card-num">' + (i + 1) + '</span></td>' +
           '<td><strong>' + esc(d.name) + '</strong></td>' +
-          '<td class="muted">' + esc(d.desc || '-') + '</td>' +
-          '<td>' + (d.headcount || '-') + ' <span class="muted">(实际 ' + members + ')</span></td>' +
+          '<td class="muted">' + esc(d.code || '-') + '</td>' +
+          '<td class="muted">' + esc(d.description || '-') + '</td>' +
           '<td class="muted">' + esc((d.created_at || '').slice(0, 10)) + '</td>' +
           '<td><button class="btn-ghost" data-edit="' + d._id + '">编辑</button> ' +
           '<button class="btn-danger" data-del="' + d._id + '">删除</button></td>' +
@@ -48,14 +43,14 @@ async function initDepartmentsPage() {
       }).join('') +
       '</tbody></table></div>';
     host.querySelectorAll('[data-edit]').forEach(function (b) {
-      b.addEventListener('click', function () { openForm(loadDepts().find(function (d) { return d._id === this.dataset.edit; }.bind(b))); }.bind(b));
+      b.addEventListener('click', function () { openForm(loadDepartments().find(function (d) { return d._id === this.dataset.edit; }.bind(b))); }.bind(b));
     });
     host.querySelectorAll('[data-del]').forEach(function (b) {
       b.addEventListener('click', function () {
         var id = this.dataset.del;
-        confirmDialog('删除部门', '确认删除该部门?该部门人员不会被删除,但会失去所属部门。', function () {
-          var l = loadDepts().filter(function (d) { return d._id !== id; });
-          saveDepts(l); paint();
+        confirmDialog('删除部门', '确认删除该部门?', function () {
+          deleteDepartment(id);
+          setTimeout(paint, 200);
         });
       });
     });
@@ -65,17 +60,17 @@ async function initDepartmentsPage() {
   document.getElementById('dNew').addEventListener('click', function () { openForm(null); });
 
   function openForm(rec) {
-    rec = rec || { name: '', desc: '', headcount: 0 };
+    rec = rec || { name: '', code: '', description: '' };
     var html = '<div class="modal-backdrop" id="dModal"><div class="modal" style="max-width:480px">' +
       '<div class="modal-head"><h3>' + (rec._id ? '编辑部门' : '添加部门') + '</h3>' +
       '<button class="modal-close" id="dCancel">×</button></div>' +
       '<div class="modal-body"><div class="form-grid">' +
       '<div class="field-row full"><label class="field-label"><span class="required">*</span>部门名称</label>' +
       '<input class="input" id="dName" value="' + esc(rec.name) + '"></div>' +
+      '<div class="field-row"><label class="field-label">编码</label>' +
+      '<input class="input" id="dCode" value="' + esc(rec.code || '') + '"></div>' +
       '<div class="field-row full"><label class="field-label">部门说明</label>' +
-      '<textarea class="input" id="dDesc" rows="2">' + esc(rec.desc || '') + '</textarea></div>' +
-      '<div class="field-row"><label class="field-label">编制人数</label>' +
-      '<input class="input" type="number" min="0" id="dHead" value="' + (rec.headcount || 0) + '"></div>' +
+      '<textarea class="input" id="dDesc" rows="2">' + esc(rec.description || '') + '</textarea></div>' +
       '</div></div>' +
       '<div class="modal-foot"><button class="btn-ghost" id="dCancel2">取消</button>' +
       '<button class="btn-success" id="dSave">' + (rec._id ? '保存修改' : '确认添加') + '</button></div>' +
@@ -85,20 +80,18 @@ async function initDepartmentsPage() {
     document.getElementById('dSave').onclick = function () {
       var name = document.getElementById('dName').value.trim();
       if (!name) { toast('请填写部门名称', 'warn'); return; }
-      var l = loadDepts();
+      var patch = {
+        name: name,
+        code: document.getElementById('dCode').value.trim(),
+        description: document.getElementById('dDesc').value,
+      };
       if (rec._id) {
-        var i = l.findIndex(function (x) { return x._id === rec._id; });
-        l[i].name = name;
-        l[i].desc = document.getElementById('dDesc').value;
-        l[i].headcount = parseInt(document.getElementById('dHead').value, 10) || 0;
+        updateDepartment(rec._id, patch);
       } else {
-        l.unshift({ _id: 'd_' + uuid().substring(0, 8), name: name,
-          desc: document.getElementById('dDesc').value,
-          headcount: parseInt(document.getElementById('dHead').value, 10) || 0,
-          created_at: new Date().toISOString() });
+        createDepartment(patch);
       }
-      saveDepts(l);
-      closeModal(); paint();
+      closeModal();
+      setTimeout(paint, 200);
       toast('已保存', 'success');
     };
   }

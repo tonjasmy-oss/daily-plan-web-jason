@@ -1,15 +1,6 @@
-/* ============================================================
- * 周计划填报 (W6)
- * - 周期范围 + 多任务卡(任务号徽章 + 内容 + 完成时间)
- * ============================================================ */
-
-var WEEKLY_PLAN_KEY = 'engms_weekly_plans_v1';
-
-function loadWeeklyPlans() {
-  try { return JSON.parse(localStorage.getItem(WEEKLY_PLAN_KEY) || '[]'); }
-  catch (e) { return []; }
-}
-function saveWeeklyPlans(list) { localStorage.setItem(WEEKLY_PLAN_KEY, JSON.stringify(list)); }
+/* 周计划填报 (W6)
+ * 数据由 /api/weekly-plans 管理, 内存缓存见 common.js 的 loadWeeklyPlans/createWeeklyPlan/updateWeeklyPlan
+ */
 function getWeekRange(d) {
   d = d || new Date();
   var dt = new Date(d);
@@ -114,7 +105,7 @@ async function initWeeklyPlanPage() {
       tasks: state.tasks, createdBy: user._id,
       created_at: new Date().toISOString(), submitted_at: new Date().toISOString()
     };
-    var list = loadWeeklyPlans(); list.unshift(rec); saveWeeklyPlans(list);
+    createWeeklyPlan(rec);  /* 走 /api/weekly-plans */
     toast('周计划已提交(' + ok.length + ' 项)', 'success');
   }
 }

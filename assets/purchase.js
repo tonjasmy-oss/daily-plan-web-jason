@@ -2,10 +2,9 @@
  * 物资申购填报 (W8) - 橙色 Hero + 申购明细 + 添加下一项
  * 必填校验:名称 / 规格型号 / 单位 / 数量 缺一不可
  * ============================================================ */
-var PURCHASE_KEY = 'engms_purchases_v1';
-
-function loadPurchases() { try { return JSON.parse(localStorage.getItem(PURCHASE_KEY) || '[]'); } catch (e) { return []; } }
-function savePurchases(l) { localStorage.setItem(PURCHASE_KEY, JSON.stringify(l)); }
+/* 物资申购 - 数据由 /api/purchases 管理
+ * 内存缓存见 common.js 的 loadPurchases/createPurchase
+ */
 
 async function initPurchasePage() {
   var user = await requireLogin();
@@ -214,13 +213,19 @@ async function initPurchasePage() {
     });
     var sum = valid.reduce(function (s, it) { return s + (Number(it.qty) || 0) * (Number(it.price) || 0); }, 0);
     var rec = {
-      _id: 'pc_' + uuid().substring(0, 12),
-      projectId: state.projectId, date: state.date, remark: state.remark,
-      items: valid, total: sum, status: isDraft ? 'draft' : 'submitted',
-      createdBy: user._id, created_at: new Date().toISOString(),
-      submitted_at: isDraft ? null : new Date().toISOString()
+      name: valid[0] ? valid[0].name : '',  /* 兼容旧数据,首项名称 */
+      spec: valid.map(function (it) { return it.spec; }).filter(Boolean).join('; '),
+      unit: valid[0] ? valid[0].unit : '',
+      qty: valid.reduce(function (s, it) { return s + (Number(it.qty) || 0); }, 0).toString(),
+      reason: state.remark,
+      applicant: user.name || '',
+      status: isDraft ? 'draft' : 'submitted',
     };
-    var l = loadPurchases(); l.unshift(rec); savePurchases(l);
+    /* 主表 + 后续 items 通过更新 payload 累加 */
+    var created = createPurchase(rec);
+    if (valid.length > 1) {
+      updatePurchase(created._id, { spec: rec.spec, qty: rec.qty });
+    }
     toast(isDraft ? '草稿已保存' : ('申购已提交,合计 ' + fmt(sum)), 'success');
     /* 提交成功后清空表单 */
     if (!isDraft) {

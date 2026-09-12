@@ -1,10 +1,9 @@
 /* ============================================================
  * 计划周报 (W5) - 周报列表 + 新建 + 概览
  * ============================================================ */
-var WR_KEY = 'engms_weekly_reports_v1';
-
-function loadWR() { try { return JSON.parse(localStorage.getItem(WR_KEY) || '[]'); } catch (e) { return []; } }
-function saveWR(l) { localStorage.setItem(WR_KEY, JSON.stringify(l)); }
+/* 计划周报 (W7) - 数据由 /api/weekly-reports 管理
+ * 内存缓存见 common.js 的 loadWeeklyReports/createWeeklyReport
+ */
 
 async function initWeeklyReportPage() {
   var user = await requireLogin();
@@ -39,8 +38,7 @@ async function initWeeklyReportPage() {
   /* 计算周报统计 */
   var tasksDone = loadTasks().filter(function (t) { return t.status === TASK_STATUS.DONE; }).length;
   var inProg = loadProjects().filter(function (p) { return p.status === PROJECT_STATUS.ACTIVE; }).length;
-  var totalPurchase = (JSON.parse(localStorage.getItem('engms_purchases_v1') || '[]'))
-    .reduce(function (s, p) { return s + (p.total || 0); }, 0);
+  var totalPurchase = loadPurchases().reduce(function (s, p) { return s + (Number(p.total) || 0); }, 0);
   document.querySelector('.mini-stat-row').innerHTML =
     mini('本周完成', tasksDone, '项任务', 'check') +
     mini('进行中', inProg, '个项目', 'inprog') +
@@ -48,7 +46,7 @@ async function initWeeklyReportPage() {
     mini('累计金额', totalPurchase.toFixed(0), '元(申购)', 'purchase');
 
   function paint() {
-    var list = loadWR();
+    var list = loadWeeklyReports();
     var host = document.getElementById('wrList');
     if (list.length === 0) {
       renderEmpty(host, '尚无周报,点击右上角新建');
@@ -56,7 +54,7 @@ async function initWeeklyReportPage() {
     }
     host.innerHTML = list.map(function (w) {
       return '<a class="list-row" href="dashboard.html">' +
-        '<div><strong>' + esc(w.weekStart) + ' ~ ' + esc(w.weekEnd) + '</strong>' +
+        '<div><strong>' + esc(w.week_start) + ' ~ ' + esc(w.week_end) + '</strong>' +
         '<div class="muted" style="font-size:13px;margin-top:4px">' + esc(w.summary || '-') + '</div></div>' +
         '<span class="chip">查看</span></a>';
     }).join('');
@@ -69,17 +67,13 @@ async function initWeeklyReportPage() {
       [{ label: '取消', value: '' }, { label: '创建', value: 'ok', primary: true }],
       function (val, text) {
         if (val !== 'ok') return;
-        var l = loadWR();
-        l.unshift({
-          _id: 'wr_' + uuid().substring(0, 12),
-          weekStart: rng.start, weekEnd: rng.end,
+        createWeeklyReport({
+          week_start: rng.start, week_end: rng.end,
           summary: text || '',
-          createdBy: user._id,
-          created_at: new Date().toISOString()
-        });
-        saveWR(l);
+          submitter: user.name || '',
+        });  /* 走 /api/weekly-reports */
         toast('周报已创建', 'success');
-        paint();
+        setTimeout(paint, 200);  /* 等待异步加载 */
       });
   });
 }
