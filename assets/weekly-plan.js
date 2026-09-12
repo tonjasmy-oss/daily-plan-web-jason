@@ -7,6 +7,10 @@
  *   - 开始日期录入后, 按周(7 天)自动补齐结束日期
  *   - 提交成功后表单清空并自动切到下一周(下次填报内容), 不回显已提交记录
  *
+ * 审批:
+ *   - 提交即进入审批流(status='pending'), 审批人可在通过前追加工作内容
+ *   - 审批通过后记录锁定, 只能在「报表浏览」页只读查看
+ *
  * 依赖 common.js: getWeekRange / addDaysStr
  */
 async function initWeeklyPlanPage() {
@@ -125,7 +129,7 @@ async function initWeeklyPlanPage() {
 
   /* FAB 提交 */
   var fab = document.createElement('button');
-  fab.className = 'fab'; fab.title = '提交'; fab.setAttribute('aria-label', '提交填报');
+  fab.className = 'fab'; fab.title = '提交审批'; fab.setAttribute('aria-label', '提交审批');
   fab.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
   fab.addEventListener('click', submit);
   document.body.appendChild(fab);
@@ -149,13 +153,16 @@ async function initWeeklyPlanPage() {
       _id: 'wp_' + uuid().substring(0, 12), projectId: state.projectId,
       startDate: state.startDate, endDate: state.endDate,
       tasks: state.tasks.filter(function (t) { return (t.title || '').trim(); }),
+      /* 提交即进入审批流: 审批人可在通过前追加工作内容 */
+      status: 'pending',
       createdBy: user._id,
+      submitter: user.name || '',
       created_at: new Date().toISOString(), submitted_at: new Date().toISOString()
     };
     createWeeklyPlan(rec);  /* 走 /api/weekly-plans */
     var period = rec.startDate + ' ~ ' + rec.endDate;
     resetToNextWeek();
-    toast('周计划已提交(' + ok.length + ' 项 · ' + period + ')，已为你打开下一周空白表单', 'success');
+    toast('周计划已提交审批(' + ok.length + ' 项 · ' + period + ')，已为你打开下一周空白表单', 'success');
   }
 }
 window.initWeeklyPlanPage = initWeeklyPlanPage;

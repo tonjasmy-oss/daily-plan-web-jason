@@ -826,6 +826,61 @@ function reportDisplayTitle(rec) {
   return pd ? (pd + ' 日报表') : '日报表';
 }
 
+/* ============================================================
+ * 计划审批 (日计划 / 周计划共用)
+ *
+ * 流程:
+ *   填报人提交 -> status='pending'(待审批)
+ *   审批人在通过前可「追加工作内容」(追加条目带 appended 标记)
+ *   审批人通过 -> status='approved', 记录锁定, 只能在报表浏览页只读查看
+ *   审批人驳回 -> status='rejected', 填报人可修改后重新提交
+ *
+ * 审批人 = 主管以上 (admin / manager), 与日计划填报页原有规则保持一致
+ * ============================================================ */
+var PLAN_APPROVE_ROLES = ['admin', 'manager'];
+var PLAN_STATUS_TEXT = { draft: '草稿', pending: '待审批', approved: '已通过', rejected: '已驳回' };
+
+/* 当前用户是否具备计划类表单的审批权 */
+function canApprovePlan(user) {
+  return !!(user && PLAN_APPROVE_ROLES.indexOf(user.role) >= 0);
+}
+
+/* 是否处于"可追加工作内容"的窗口: 待审批 + 审批人 */
+function planAppendable(rec, user) {
+  return !!(rec && rec.status === 'pending' && canApprovePlan(user));
+}
+
+/* 生成一条"审批追加"的工作内容
+ * 注意: 日计划任务字段名是 content, 周计划是 title —— 两个都写,
+ * 两种记录(以及各自的导出/详情渲染)才能通用 */
+function makeAppendedTask(content, user) {
+  var text = String(content || '').trim();
+  return {
+    id: 'ap' + Math.random().toString(36).slice(2, 9),
+    content: text, title: text,
+    requirement: '', members: [], startTime: '', endTime: '',
+    appended: true,
+    appended_by: (user && user.name) || '',
+    appended_at: new Date().toISOString()
+  };
+}
+
+/* 逐行追加工作内容到计划记录, 返回成功追加的条数 (空行忽略) */
+function planAppendTasks(rec, text, user) {
+  if (!rec) return 0;
+  var lines = String(text || '').split(/\r?\n/).map(function (s) { return s.trim(); })
+    .filter(function (s) { return !!s; });
+  if (lines.length === 0) return 0;
+  if (!Array.isArray(rec.tasks)) rec.tasks = [];
+  lines.forEach(function (line) { rec.tasks.push(makeAppendedTask(line, user)); });
+  return lines.length;
+}
+
+/* 记录里被审批追加的条目数 */
+function planAppendedCount(rec) {
+  return ((rec && rec.tasks) || []).filter(function (t) { return t && t.appended; }).length;
+}
+
 /* ===== HTML 转义 ===== */
 function esc(str) {
   if (str == null) return '';

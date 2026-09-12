@@ -3034,7 +3034,7 @@ table.data-table {
 /* ============================================================
  * 报表浏览 — 详情弹层 (W7)
  * ============================================================ */
-.pb-overlay .modal-body { max-height: 68vh; }
+.pb-overlay .modal-body { max-height: 78vh; }
 .pb-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pb-row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pb-row .chip { transition: all 0.15s; }
@@ -3091,5 +3091,84 @@ table.data-table {
 /* 计划周报: 留档行(不可跳转) */
 .wr-row { cursor: default; }
 .wr-row:hover { border-color: var(--border); }
+
+/* ============================================================
+ * 审批追加工作内容 (v8)
+ *   日计划 / 周计划提交后, 审批人可在通过前追加工作内容,
+ *   追加条目以「审批追加」标记区分, 通过后随计划一并归档
+ * ============================================================ */
+/* 日计划填报页: 追加条目单独渲染 */
+.rp-task-row-appended {
+  border-left: 3px solid var(--warning);
+  background: rgba(245, 158, 11, 0.06);
+}
+.rp-task-num-appended {
+  background: linear-gradient(135deg, var(--warning), #F0A020);
+  font-size: 13px;
+}
+.rp-task-appended-tag {
+  display: inline-block; margin-left: 8px; padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--warning-bg); color: var(--warning);
+  font-size: 11px; font-weight: 600; vertical-align: middle;
+}
+.rp-task-appended-text {
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-input); border: 1px dashed var(--border-light);
+  color: var(--text); font-size: 14px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+}
+.rp-append-remove {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.rp-append-remove:hover {
+  color: var(--danger); border-color: rgba(237, 66, 69, 0.5); background: var(--danger-bg);
+}
+
+/* 报表浏览: 列表/详情里的「审批追加」标记 */
+.pb-appended-tag {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--warning-bg); color: var(--warning);
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+/* 报表浏览: 详情里的内联审批区 (不能用弹窗, 会连带销毁详情弹层) */
+.pb-approve-box {
+  margin-top: 18px; padding: 16px;
+  border: 1px solid rgba(88, 101, 242, 0.35);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+.pb-approve-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 10px; font-weight: 700; color: var(--text);
+}
+.pb-approve-label {
+  display: block; margin: 10px 0 6px;
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+}
+.pb-approve-opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+.pb-approve-box .textarea { width: 100%; }
+.pb-approve-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+/* 追加 / 驳回 两栏并排, 主操作「通过审批」单独置底, 保证首屏可见 */
+.pb-approve-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.pb-approve-col .pb-approve-label { margin-top: 0; }
+.pb-approve-final {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--divider);
+}
+.pb-approve-final .btn { min-width: 150px; justify-content: center; }
+.pb-approve-tip { color: var(--text-muted); font-size: 12px; }
+@media (max-width: 720px) {
+  .pb-approve-cols { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .pb-approve-row .btn { flex: 1 1 auto; justify-content: center; }
+  .pb-approve-final .btn { flex: 1 1 auto; }
+}
 
 

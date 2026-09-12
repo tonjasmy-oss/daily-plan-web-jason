@@ -178,6 +178,10 @@ async function initDailyPlanPage() {
   function canApprove() {
     return DP_APPROVE_ROLES.indexOf(user.role) >= 0 && form.status === 'pending';
   }
+  /* 审批人在"待审批"窗口内可追加工作内容 (复用 common.js 的统一规则) */
+  function canAppend() {
+    return planAppendable(form, user);
+  }
 
   /* ---------- 校验 ---------- */
   function validateForm() {
@@ -189,6 +193,8 @@ async function initDailyPlanPage() {
     for (var i = 0; i < form.tasks.length; i++) {
       var t = form.tasks[i];
       if (!(t.content || '').trim()) continue;
+      /* 审批追加的条目只需工作内容, 不参与必填校验(工作要求/人员/时间由原计划承担) */
+      if (t.appended) continue;
       if (!(t.requirement || '').trim()) { highlightTaskFieldError(i, 'requirement'); toast('请填写任务"' + (i + 1) + '"的工作要求', 'error'); return false; }
       if (!t.members || t.members.length === 0) { highlightTaskFieldError(i, 'members'); toast('请勾选任务"' + (i + 1) + '"的计划实施人员', 'error'); return false; }
       if (!t.startTime || !t.endTime) { highlightTaskFieldError(i, 'time'); toast('请填写任务"' + (i + 1) + '"的计划完成时间', 'error'); return false; }
@@ -283,6 +289,25 @@ async function initDailyPlanPage() {
         form.rejected_reason = reason;
         persist();
         toast('已驳回', 'warn');
+        render();
+      }
+    );
+  }
+  /* ---------- 审批追加工作内容 ---------- */
+  function appendWork() {
+    if (!canAppend()) return;
+    confirmDialogEx('追加工作内容',
+      '<div class="form-section">' +
+        '<label class="form-label">补充的工作内容 <span class="required">*</span></label>' +
+        '<textarea class="textarea" id="dp_append_text" rows="4" placeholder="一行一条, 可一次填写多条。例如:&#10;补充检查 3 层临边防护&#10;跟进消防通道清理"></textarea>' +
+        '<p class="form-hint">追加内容会排在原计划之后并标记为「审批追加」，通过后随计划一并归档与导出；通过前可逐条移除。</p>' +
+      '</div>',
+      function () {
+        var el = document.getElementById('dp_append_text');
+        var n = planAppendTasks(form, el && el.value, user);
+        if (n === 0) { toast('请填写要追加的工作内容', 'error'); return false; }
+        persist();
+        toast('已追加 ' + n + ' 条工作内容', 'success');
         render();
       }
     );
@@ -411,6 +436,7 @@ async function initDailyPlanPage() {
     } else if (st === 'pending') {
       if (DP_APPROVE_ROLES.indexOf(user.role) >= 0) {
         actions =
+          '<button class="btn btn-default btn-lg" id="btnAppend">+ 追加工作内容</button>' +
           '<button class="btn btn-success btn-lg" id="btnApprove">✓ 通过</button>' +
           '<button class="btn btn-danger btn-lg" id="btnReject">驳回</button>';
       } else {
@@ -462,7 +488,9 @@ async function initDailyPlanPage() {
           '<h3 style="margin:0;">计划工作内容 <span class="sec-meta">填写后点击"同步"可一键应用本条字段到所有任务</span></h3>' +
           (editable ? '<div class="dp-section-actions">' +
             '<button class="btn-link" id="btnAddTask">+ 添加任务</button>' +
-          '</div>' : '') +
+          '</div>' : (canAppend() ? '<div class="dp-section-actions">' +
+            '<button class="btn-link" id="btnAppendInline">+ 追加工作内容</button>' +
+          '</div>' : '')) +
         '</div>' +
         '<div class="rp-task-list" id="rpTaskList">' + tasksHtml + '</div>' +
       '</div>' +
@@ -499,6 +527,8 @@ async function initDailyPlanPage() {
 
   /* 渲染单条任务 */
   function renderTaskRow(t, i, editable) {
+    /* 审批追加的条目: 只有工作内容, 单独紧凑渲染 */
+    if (t.appended) return renderAppendedRow(t, i);
     var memberChips = (t.members || []).map(function (mid) {
       var m = members.find(function (mm) { return mm._id === mid; });
       if (!m) return '';
@@ -551,6 +581,27 @@ async function initDailyPlanPage() {
       '<div class="rp-task-side-actions">' +
         (editable && form.tasks.length > 1 ? '<button class="rp-task-sync" data-i="' + i + '" type="button" title="把本条字段同步到其他任务">↻ 同步</button>' : '') +
         (editable ? '<button class="rp-task-remove" data-i="' + i + '" type="button" title="删除任务">' + rpIconTrash() + '</button>' : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  /* 渲染"审批追加"条目 */
+  function renderAppendedRow(t, i) {
+    var removable = canAppend();
+    return '<div class="rp-task-row rp-task-row-appended" data-i="' + i + '">' +
+      '<div class="rp-task-num rp-task-num-appended">补</div>' +
+      '<div class="rp-task-body">' +
+        '<div class="rp-task-field rp-task-content">' +
+          '<label class="rp-task-label">计划工作内容' +
+            '<span class="rp-task-appended-tag">审批追加</span>' +
+            '<span class="rp-task-hint">' + esc(t.appended_by || '') +
+              (t.appended_at ? ' · ' + esc(formatDateTime(t.appended_at)) : '') + '</span>' +
+          '</label>' +
+          '<div class="rp-task-appended-text">' + esc(t.content || '') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="rp-task-side-actions">' +
+        (removable ? '<button class="rp-append-remove" data-i="' + i + '" type="button" title="移除这条追加内容">' + rpIconTrash() + '</button>' : '') +
       '</div>' +
     '</div>';
   }
@@ -675,6 +726,19 @@ async function initDailyPlanPage() {
       };
     });
 
+    /* 移除"审批追加"条目 (仅审批人, 通过前可撤销) */
+    document.querySelectorAll('.rp-append-remove').forEach(function (btn) {
+      btn.onclick = function () {
+        var i = parseInt(this.dataset.i, 10);
+        var t = form.tasks[i];
+        if (!t || !t.appended) return;
+        form.tasks.splice(i, 1);
+        persist();
+        toast('已移除该条追加内容');
+        render();
+      };
+    });
+
     /* 添加任务实施人员 */
     document.querySelectorAll('.rp-task-add-member[data-i]').forEach(function (btn) {
       btn.onclick = function () {
@@ -732,6 +796,8 @@ async function initDailyPlanPage() {
     var dBtn = document.getElementById('btnSaveDraft');    if (dBtn) dBtn.onclick = saveDraft;
     var rBtn = document.getElementById('btnReopen');       if (rBtn) rBtn.onclick = reopenToEdit;
     var aBtn = document.getElementById('btnApprove');      if (aBtn) aBtn.onclick = approveForm;
+    var apBtn = document.getElementById('btnAppend');        if (apBtn) apBtn.onclick = appendWork;
+    var apBtn2 = document.getElementById('btnAppendInline'); if (apBtn2) apBtn2.onclick = appendWork;
     var jBtn = document.getElementById('btnReject');       if (jBtn) jBtn.onclick = rejectForm;
     var xBtn = document.getElementById('btnDelete');       if (xBtn) xBtn.onclick = deleteRecord;
     var eJ = document.getElementById('btnExportJSON');     if (eJ) eJ.onclick = exportJSON;

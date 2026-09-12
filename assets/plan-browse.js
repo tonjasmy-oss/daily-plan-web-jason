@@ -23,8 +23,12 @@ var PB_EMPTY_TEXT = {
   report:  '尚无日报记录'
 };
 
-/* 日计划状态 → 文案 / 复用日报状态标签配色 */
-var PB_DAILY_STATUS = { draft: '草稿', pending: '待审批', approved: '已通过', rejected: '已驳回' };
+/* 日计划 / 周计划状态文案 (与 common.js 的 PLAN_STATUS_TEXT 保持一致) */
+var PB_PLAN_STATUS = (typeof PLAN_STATUS_TEXT !== 'undefined' && PLAN_STATUS_TEXT)
+  ? PLAN_STATUS_TEXT
+  : { draft: '草稿', pending: '待审批', approved: '已通过', rejected: '已驳回' };
+var PB_DAILY_STATUS = PB_PLAN_STATUS;   /* 保留旧名, 日计划列表/详情继续使用 */
+
 /* 状态 → 标签配色 (复用 .report-status-* 类) */
 var PB_STATUS_CLASS = {
   draft: 'draft', pending: 'submitted', approved: 'signed', rejected: 'rejected',
@@ -116,7 +120,8 @@ function pbSub(rec, tab) {
   }
   if (tab === 'weekly') {
     var p = pbProjectName(rec.projectId);
-    return (p ? p + ' · ' : '') + (rec.tasks || []).length + ' 项任务';
+    return (p ? p + ' · ' : '') + (rec.tasks || []).length + ' 项任务 · ' +
+      (PB_PLAN_STATUS[rec.status || 'draft'] || '草稿');
   }
   if (tab === 'report') {
     var cats = [];
@@ -129,6 +134,7 @@ function pbSub(rec, tab) {
 }
 function pbRowTag(rec, tab) {
   if (tab === 'daily') return pbStatusTag(rec.status, PB_DAILY_STATUS);
+  if (tab === 'weekly') return pbStatusTag(rec.status || 'draft', PB_PLAN_STATUS);
   if (tab === 'report') return pbStatusTag(rec.status, REPORT_STATUS_TEXT);
   return '';
 }
@@ -171,6 +177,11 @@ function pbPhotoBlock(tasks) {
     }).join('') + '</div>');
 }
 
+/* 内容单元格: 审批追加的条目额外带一个标记 */
+function pbContentCell(text, t) {
+  return esc(text) + ((t && t.appended) ? ' <span class="pb-appended-tag">审批追加</span>' : '');
+}
+
 function pbDailyDetail(rec) {
   var st = rec.status || 'draft';
   var meta = '<div class="pb-meta-grid">' +
@@ -188,7 +199,7 @@ function pbDailyDetail(rec) {
   var rows = (rec.tasks || []).map(function (t, i) {
     return [
       '<span class="col-num">' + (i + 1) + '</span>',
-      esc(t.content),
+      pbContentCell(t.content, t),
       esc(t.requirement),
       esc(pbNames(t.members)),
       esc([t.startTime, t.endTime].filter(Boolean).join(' ~ '))
@@ -208,18 +219,24 @@ function pbDailyDetail(rec) {
 }
 
 function pbWeeklyDetail(rec) {
+  var st = rec.status || 'draft';
   var meta = '<div class="pb-meta-grid">' +
     pbMeta('计划周期', esc((rec.startDate || '') + ' ~ ' + (rec.endDate || ''))) +
     pbMeta('关联项目', esc(pbProjectName(rec.projectId))) +
-    pbMeta('提交人', esc(pbName(rec.createdBy))) +
+    pbMeta('状态', pbStatusTag(st, PB_PLAN_STATUS)) +
+    pbMeta('提交人', esc(rec.submitter || pbName(rec.createdBy))) +
     pbMeta('提交时间', esc(pbTime(rec.submitted_at || rec.created_at))) +
+    pbMeta('审批人', esc(pbName(rec.approver) || rec.approver)) +
+    (st === 'rejected'
+      ? pbMeta('驳回原因', esc(rec.rejected_reason))
+      : pbMeta('审批时间', esc(pbTime(rec.approved_at)))) +
     '</div>';
 
   var rows = (rec.tasks || []).filter(function (t) { return (t.title || '').trim(); })
     .map(function (t, i) {
       return [
         '<span class="col-num">' + (i + 1) + '</span>',
-        esc(t.title),
+        pbContentCell(t.title, t),
         esc(pbName(t.ownerId)),
         esc(t.dueDate)
       ];
@@ -296,6 +313,7 @@ function pbExportable(tab) {
 }
 function pbExportBlockedReason(rec, tab) {
   if (tab === 'daily' && (rec.status || 'draft') !== 'approved') return '仅审批通过的日计划可导出';
+  if (tab === 'weekly' && (rec.status || 'draft') !== 'approved') return '仅审批通过的周计划可导出';
   return '';
 }
 function pbExport(rec, tab) {
@@ -315,6 +333,56 @@ function pbExport(rec, tab) {
     if (typeof exportReportToExcel !== 'function') { toast('Excel 模块未加载', 'error'); return; }
     exportReportToExcel(rec);
   }
+}
+
+/* ------------------------------------------------------------
+ * 审批 (日计划 / 周计划)
+ *
+ * 注意: common.js 的 confirmDialogEx / promptDialog / multiSelectDialog 在打开时
+ * 会清空页面里所有 .modal-overlay, 在详情弹层之上再开弹窗会把详情一起销毁。
+ * 因此这里的审批操作全部内联在详情弹层内部, 不复用那些对话框。
+ * ------------------------------------------------------------ */
+/* 把变更就地写回记录与服务器 (日计划 / 周计划) */
+function pbSavePlan(rec, tab, patch) {
+  if (!rec) return;
+  if (patch) Object.assign(rec, patch);
+  if (tab === 'daily') updateDailyPlan(rec._id, rec);
+  else if (tab === 'weekly') updateWeeklyPlan(rec._id, rec);
+}
+
+/* 审批操作区: 仅「审批人 + 待审批」时出现 */
+function pbApproveBox(rec, tab) {
+  if (tab !== 'daily' && tab !== 'weekly') return '';
+  var user = (typeof getCurrentUser === 'function') ? getCurrentUser() : null;
+  if (!planAppendable(rec, user)) return '';
+  var n = planAppendedCount(rec);
+  return '<div class="pb-approve-box">' +
+    '<div class="pb-approve-head">审批操作' +
+      '<span class="sec-meta">' + (n ? '已追加 ' + n + ' 条 · ' : '') +
+      '可先追加工作内容再通过</span></div>' +
+    '<div class="pb-approve-cols">' +
+      '<div class="pb-approve-col">' +
+        '<label class="pb-approve-label" for="pbAppendInput">追加工作内容 <span class="pb-approve-opt">选填 · 一行一条</span></label>' +
+        '<textarea class="textarea pb-append-input" id="pbAppendInput" rows="2" ' +
+          'placeholder="例如：补充检查 3 层临边防护"></textarea>' +
+        '<div class="pb-approve-row">' +
+          '<button class="btn btn-default pb-append" type="button">+ 追加到计划</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pb-approve-col">' +
+        '<label class="pb-approve-label" for="pbRejectInput">驳回原因 <span class="pb-approve-opt">驳回时必填</span></label>' +
+        '<textarea class="textarea pb-reject-input" id="pbRejectInput" rows="2" ' +
+          'placeholder="请说明驳回原因，填报人可据此修改后重新提交"></textarea>' +
+        '<div class="pb-approve-row">' +
+          '<button class="btn btn-danger pb-approve-rj" type="button">驳回</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="pb-approve-final">' +
+      '<button class="btn btn-success pb-approve-ok" type="button">✓ 通过审批</button>' +
+      '<span class="pb-approve-tip">通过后记录锁定，只能查看，不可修改</span>' +
+    '</div>' +
+  '</div>';
 }
 
 /* ------------------------------------------------------------
@@ -356,7 +424,7 @@ function pbOpenDetail(rec, tab, opts) {
           '<button class="modal-close" type="button" aria-label="关闭">' + PB_SVG_CLOSE + '</button>' +
         '</span>' +
       '</div>' +
-      '<div class="modal-body">' + pbDetailHtml(rec, tab) + '</div>' +
+      '<div class="modal-body">' + pbDetailHtml(rec, tab) + pbApproveBox(rec, tab) + '</div>' +
       '<div class="modal-footer">' +
         exportGroup +
         '<button class="btn-secondary pb-close" type="button">关闭</button>' +
@@ -392,6 +460,48 @@ function pbOpenDetail(rec, tab, opts) {
     if (typeof pbExportMedia !== 'function') { toast('导出组件未加载', 'error'); return; }
     pbExportMedia(rec, tab, 'pdf');
   });
+  /* ---- 审批操作 (内联) ---- */
+  var appendBtn = ov.querySelector('.pb-append');
+  if (appendBtn) appendBtn.onclick = function () {
+    var ta = ov.querySelector('.pb-append-input');
+    var n = planAppendTasks(rec, ta && ta.value, getCurrentUser());
+    if (n === 0) { toast('请填写要追加的工作内容', 'warn'); return; }
+    pbSavePlan(rec, tab);                       /* 内容已写入 rec.tasks, 这里落库 */
+    toast('已追加 ' + n + ' 条工作内容', 'success');
+    if (window.pbRefreshList) window.pbRefreshList();
+    pbOpenDetail(rec, tab, { keepUrl: true });
+  };
+  var okBtn = ov.querySelector('.pb-approve-ok');
+  if (okBtn) okBtn.onclick = function () {
+    var u = getCurrentUser() || {};
+    pbSavePlan(rec, tab, {
+      status: 'approved',
+      approver: u.name || '',
+      approved_at: new Date().toISOString(),
+      reviewed_by: u.name || '',
+      rejected_reason: '', rejected_at: ''
+    });
+    toast('已审批通过，记录已锁定', 'success');
+    if (window.pbRefreshList) window.pbRefreshList();
+    pbOpenDetail(rec, tab, { keepUrl: true });
+  };
+  var rjBtn = ov.querySelector('.pb-approve-rj');
+  if (rjBtn) rjBtn.onclick = function () {
+    var ta = ov.querySelector('.pb-reject-input');
+    var reason = (ta && ta.value || '').trim();
+    if (!reason) { toast('请填写驳回原因', 'warn'); return; }
+    var u = getCurrentUser() || {};
+    pbSavePlan(rec, tab, {
+      status: 'rejected',
+      reviewed_by: u.name || '',
+      rejected_at: new Date().toISOString(),
+      rejected_reason: reason
+    });
+    toast('已驳回', 'warn');
+    if (window.pbRefreshList) window.pbRefreshList();
+    pbOpenDetail(rec, tab, { keepUrl: true });
+  };
+
   ov.addEventListener('mousedown', function (e) { if (e.target === ov) ov._bg = true; });
   ov.addEventListener('click', function (e) {
     if (e.target === ov && ov._bg) { ov._bg = false; close(); }
@@ -419,15 +529,14 @@ async function initPlanBrowsePage() {
   var validTab = PB_TABS.filter(function (t) { return t.id === tab; }).length > 0;
   if (!validTab) tab = 'daily';
 
-  var list = pbList(tab);
-
   renderPage({
     active: 'browse',
     pageHtml:
       '<nav class="breadcrumb"><a href="dashboard.html">工作台</a><span class="sep">/</span><span>报表浏览</span></nav>' +
       '<div class="page-header"><div><h2>报表浏览</h2>' +
-        '<div class="page-sub">查看已填报的日计划 / 周计划 / 日常日报，点击右侧「查看」展开详情，并可按需导出 Excel / 图片 / PDF</div></div></div>' +
-      '<div class="tabs">' + PB_TABS.map(function (t) {
+        '<div class="page-sub">查看已填报的日计划 / 周计划 / 日常日报，点击右侧「查看」展开详情，并可按需导出 Excel / 图片 / PDF' +
+        (canApprovePlan(user) ? '；待审批的计划可直接在详情中追加工作内容并审批' : '') + '</div></div></div>' +
+      '<div class="tabs" id="pbTabs">' + PB_TABS.map(function (t) {
         var n = pbList(t.id).length;
         return '<a class="tab' + (t.id === tab ? ' active' : '') + '" href="?tab=' + t.id + '">' +
           esc(t.label) + (n ? '<span class="tab-count">' + n + '</span>' : '') + '</a>';
@@ -436,35 +545,53 @@ async function initPlanBrowsePage() {
   });
 
   var host = document.getElementById('pbList');
+  var tabsHost = document.getElementById('pbTabs');
 
-  if (!list.length) {
-    renderEmpty(host, PB_EMPTY_TEXT[tab] || '暂无数据');
-    return;
+  /* 列表与页签计数就地重绘 (审批操作后需要刷新状态标签) */
+  function paintTabs() {
+    if (!tabsHost) return;
+    tabsHost.innerHTML = PB_TABS.map(function (t) {
+      var n = pbList(t.id).length;
+      return '<a class="tab' + (t.id === tab ? ' active' : '') + '" href="?tab=' + t.id + '">' +
+        esc(t.label) + (n ? '<span class="tab-count">' + n + '</span>' : '') + '</a>';
+    }).join('');
   }
 
-  host.innerHTML = list.map(function (rec, i) {
-    var tag = pbRowTag(rec, tab);
-    return '<a class="list-row pb-row" href="' + esc(pbRowHref(rec, tab)) + '" data-i="' + i + '">' +
-      '<div><strong>' + esc(pbTitle(rec, tab)) + '</strong>' +
-      '<div class="muted" style="font-size:13px;margin-top:4px">' + esc(pbSub(rec, tab)) + '</div></div>' +
-      '<span class="pb-row-right">' + tag + '<span class="chip">查看</span></span>' +
-      '</a>';
-  }).join('');
+  function paintList() {
+    var list = pbList(tab);
+    if (!list.length) {
+      renderEmpty(host, PB_EMPTY_TEXT[tab] || '暂无数据');
+      paintTabs();
+      return;
+    }
+    host.innerHTML = list.map(function (rec, i) {
+      var tag = pbRowTag(rec, tab);
+      return '<a class="list-row pb-row" href="' + esc(pbRowHref(rec, tab)) + '" data-i="' + i + '">' +
+        '<div><strong>' + esc(pbTitle(rec, tab)) + '</strong>' +
+        '<div class="muted" style="font-size:13px;margin-top:4px">' + esc(pbSub(rec, tab)) + '</div></div>' +
+        '<span class="pb-row-right">' + tag + '<span class="chip">查看</span></span>' +
+        '</a>';
+    }).join('');
 
-  host.querySelectorAll('.pb-row').forEach(function (el) {
-    el.addEventListener('click', function (e) {
-      e.preventDefault();
-      var rec = list[parseInt(this.dataset.i, 10)];
-      if (!rec) return;
-      try { history.pushState({ pbId: rec._id }, '', pbRowHref(rec, tab)); } catch (_) { /* ignore */ }
-      pbOpenDetail(rec, tab);
+    host.querySelectorAll('.pb-row').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        var rec = pbList(tab)[parseInt(this.dataset.i, 10)];
+        if (!rec) return;
+        try { history.pushState({ pbId: rec._id }, '', pbRowHref(rec, tab)); } catch (_) { /* ignore */ }
+        pbOpenDetail(rec, tab);
+      });
     });
-  });
+    paintTabs();
+  }
+  /* 供详情弹层里的审批操作回调, 就地刷新背后的列表 */
+  window.pbRefreshList = paintList;
+  paintList();
 
   /* 直接用带 id 的链接进来 → 自动弹出对应详情 */
   var urlId = queryParam('id');
   if (urlId) {
-    var hit = list.filter(function (r) { return String(r._id) === String(urlId); })[0];
+    var hit = pbList(tab).filter(function (r) { return String(r._id) === String(urlId); })[0];
     if (hit) pbOpenDetail(hit, tab, { keepUrl: true });
     else toast('未找到该条记录', 'warn');
   }
@@ -473,7 +600,7 @@ async function initPlanBrowsePage() {
   window.addEventListener('popstate', function () {
     var id = queryParam('id');
     if (!id) { pbCloseDetail(); return; }
-    var r = list.filter(function (x) { return String(x._id) === String(id); })[0];
+    var r = pbList(tab).filter(function (x) { return String(x._id) === String(id); })[0];
     if (r) pbOpenDetail(r, tab, { keepUrl: true });
   });
 }
