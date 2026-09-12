@@ -30,6 +30,12 @@ var PBX_CSS = '' +
   '.pbx-table th,.pbx-table td{border:1px solid #dddddd;padding:6px 8px;vertical-align:top;text-align:left}' +
   '.pbx-table th{background:#f5f6f8;font-weight:600;color:#333333}' +
   '.pbx-num{width:34px;text-align:center;color:#666666}' +
+  /* 人员安排: 「类型」列定宽且不换行(否则会被挤成一字一行);
+     提高选择器权重以压过 .pbx-table td 的默认左对齐/颜色 */
+  '.pbx-table th.pbx-crew-key,.pbx-table td.pbx-crew-key{' +
+    'width:88px;white-space:nowrap;text-align:left;color:#1a1a1a}' +
+  '.pbx-table th.pbx-crew-num,.pbx-table td.pbx-crew-num{' +
+    'width:64px;white-space:nowrap;text-align:left;color:#1a1a1a}' +
   '.pbx-photos{width:100%;border-collapse:collapse;margin-top:2px}' +
   '.pbx-photos td.pbx-photo{width:33.33%;border:1px solid #dddddd;padding:5px;vertical-align:top}' +
   '.pbx-photos td.pbx-photo img{width:100%;display:block;background:#f5f6f8}' +
@@ -107,16 +113,24 @@ function pbxMetaTable(rows) {
     }).join('');
   return '<table class="pbx-meta">' + body + '</table>';
 }
-function pbxDataTable(headers, rows) {
+/* opts.firstClass 首列类(默认 pbx-num 序号列, 传 '' 表示不加)
+   opts.lastClass  末列类(默认不加) */
+function pbxDataTable(headers, rows, opts) {
   if (!rows.length) return '<div class="pbx-empty">无记录</div>';
+  opts = opts || {};
+  var firstCls = (opts.firstClass === undefined) ? 'pbx-num' : opts.firstClass;
+  var attr = function (i, n) {
+    var cls = i === 0 ? firstCls : (i === n - 1 ? (opts.lastClass || '') : '');
+    return cls ? ' class="' + cls + '"' : '';
+  };
   return '<table class="pbx-table"><thead><tr>' +
     headers.map(function (h, i) {
-      return '<th' + (i === 0 ? ' class="pbx-num"' : '') + '>' + esc(h) + '</th>';
+      return '<th' + attr(i, headers.length) + '>' + esc(h) + '</th>';
     }).join('') +
     '</tr></thead><tbody>' +
     rows.map(function (r) {
       return '<tr>' + r.map(function (c, i) {
-        return '<td' + (i === 0 ? ' class="pbx-num"' : '') + '>' + c + '</td>';
+        return '<td' + attr(i, r.length) + '>' + c + '</td>';
       }).join('') + '</tr>';
     }).join('') + '</tbody></table>';
 }
@@ -177,7 +191,8 @@ function pbxBodyDaily(rec) {
     pbxHeading('计划工作内容（共 ' + rows.length + ' 项）') +
     pbxDataTable(['#', '计划工作内容', '工作要求', '计划实施人员', '计划完成时间'], rows) +
     pbxHeading('人员安排') +
-    pbxDataTable(['类型', '人员名单', '人数'], crewRows) +
+    pbxDataTable(['类型', '人员名单', '人数'], crewRows,
+      { firstClass: 'pbx-crew-key', lastClass: 'pbx-crew-num' }) +
     pbxHeading('备注') +
     '<div class="pbx-remarks">' + (esc(rec.remarks) || '无') + '</div>';
 }
