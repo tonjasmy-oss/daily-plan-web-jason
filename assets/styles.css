@@ -3031,4 +3031,53 @@ table.data-table {
   .fm-count { width: 100%; }
 }
 
+/* ============================================================
+ * 计划浏览 — 详情弹层 (W7)
+ * ============================================================ */
+.pb-overlay .modal-body { max-height: 68vh; }
+.pb-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.pb-row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.pb-row .chip { transition: all 0.15s; }
+.pb-row:hover .chip { background: var(--primary-bg); color: var(--primary-light); }
+
+.pb-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; }
+.pb-meta-item { display: flex; gap: 10px; font-size: 13px; min-width: 0; }
+.pb-meta-label { flex: 0 0 76px; color: var(--text-muted); }
+.pb-meta-value { flex: 1; min-width: 0; color: var(--text); word-break: break-word; }
+
+.pb-block { margin-bottom: 20px; }
+.pb-block:last-child { margin-bottom: 0; }
+.pb-block > h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+.pb-none { padding: 6px 0; font-size: 13px; color: var(--text-muted); }
+.pb-remarks {
+  font-size: 13px; line-height: 1.7; color: var(--text-secondary);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.pb-att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+.pb-att-thumb {
+  position: relative; display: block; aspect-ratio: 1 / 1;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--input-bg);
+}
+.pb-att-thumb:hover { border-color: var(--primary); }
+.pb-att-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pb-att-tag {
+  position: absolute; left: 6px; bottom: 6px;
+  padding: 1px 7px; border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 11px;
+}
+
+.pb-sign {
+  display: inline-block; padding: 8px 12px;
+  background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.pb-sign img { display: block; max-width: 100%; max-height: 96px; }
+
+@media (max-width: 640px) {
+  .pb-meta-grid { grid-template-columns: 1fr; }
+  .pb-meta-label { flex-basis: 64px; }
+  .pb-overlay .modal-body { max-height: none; }
+}
+
 
