@@ -2,10 +2,26 @@
  * Excel 导出（移植自小程序 utils/exportExcel.js）
  * 依赖 assets/xlsx.full.min.js（SheetJS 浏览器版）
  *
- * 两个入口:
- *   exportReportToExcel(report, onDone)         日报表填报
- *   exportDailyPlanToExcel(plan, members, onDone) 日计划填报 (审批通过后)
+ * 三个入口:
+ *   exportReportToExcel(report, onDone)              日报表填报
+ *   exportDailyPlanToExcel(plan, members, onDone)    日计划填报 (审批通过后)
+ *   exportWeeklyPlanToExcel(plan, members, onDone)   周计划填报
  * ============================================================ */
+
+/* 附件文件名清单: 兼容旧 {before,during,after} 与新数组格式 */
+function attachNames(att) {
+  if (Array.isArray(att)) {
+    return att.filter(function (a) { return a && a.url; })
+      .map(function (a) { return a.filename || a.rel_path || '附件'; });
+  }
+  if (att && typeof att === 'object') {
+    var label = { before: '处理前', during: '处理中', after: '处理后' };
+    return ['before', 'during', 'after']
+      .filter(function (k) { return att[k]; })
+      .map(function (k) { return label[k]; });
+  }
+  return [];
+}
 
 function exportReportToExcel(report, onDone) {
   if (typeof XLSX === 'undefined') {
@@ -38,33 +54,25 @@ function exportReportToExcel(report, onDone) {
   if (report.signature) wsData.push(['签名', '已签名']);
   wsData.push(['']);
 
-  /* 附件汇总（指示是否存在,不嵌图片） */
-  var anyAttach = false;
-  var attachLabels = { before: '处理前', during: '处理中', after: '处理后' };
+  /* 附件汇总（只列文件名与数量, 不嵌图片）
+   * 兼容两代数据结构: 新数组 [{filename,url,...}] 与旧 {before,during,after} */
+  var attachRows = [];
   tasks.forEach(function (t) {
     if (!t.content || !t.content.trim()) return;
-    var a = (t.attachments && typeof t.attachments === 'object') ? t.attachments : {};
-    if (a.before || a.during || a.after) anyAttach = true;
+    var names = attachNames(t.attachments);
+    if (names.length) attachRows.push([attachRows.length + 1, names.join('、'), names.length + ' 张']);
   });
-  if (anyAttach) {
-    wsData.push(['任务附件（处理前 / 处理中 / 处理后）']);
-    wsData.push(['#', '处理前', '处理中', '处理后']);
-    tasks.forEach(function (t, idx) {
-      if (!t.content || !t.content.trim()) return;
-      var a = (t.attachments && typeof t.attachments === 'object') ? t.attachments : {};
-      var attachSummary = ['before', 'during', 'after'].map(function (k) {
-        return a[k] ? '✓ 已上传' : '—';
-      });
-      wsData.push([idx + 1].concat(attachSummary));
-    });
-    wsData.push(['说明', '图片以附件形式随填报记录一并存档']);
+  if (attachRows.length) {
+    wsData.push(['任务附件']);
+    wsData.push(['#', '附件文件名', '数量']);
+    attachRows.forEach(function (r) { wsData.push(r); });
   }
 
   wsData.push(['']);
   wsData.push(['导出时间', formatDateTime(new Date())]);
 
   var ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{ wch: 10 }, { wch: 50 }];
+  ws['!cols'] = [{ wch: 10 }, { wch: 50 }, { wch: 10 }];
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '工作安排');
 
@@ -190,5 +198,67 @@ function exportDailyPlanToExcel(plan, members, onDone) {
   if (onDone) onDone();
 }
 
+/* ---------- 周计划填报导出 ---------- */
+function exportWeeklyPlanToExcel(plan, members, onDone) {
+  if (typeof XLSX === 'undefined') {
+    toast('Excel 组件未加载', 'error');
+    if (onDone) onDone();
+    return;
+  }
+
+  function memberName(id) {
+    if (!members) return '-';
+    var m = members.find(function (mm) { return mm._id === id; });
+    return m ? m.name : '-';
+  }
+  /* 关联项目名 (loadProjects 来自 common.js) */
+  function projectName() {
+    if (!plan.projectId) return '';
+    var ps = (typeof loadProjects === 'function') ? (loadProjects() || []) : [];
+    var hit = ps.filter(function (p) { return p._id === plan.projectId; })[0];
+    return hit ? hit.name : '';
+  }
+
+  var wsData = [];
+  wsData.push(['工程部周计划工作安排']);
+  wsData.push(['']);
+  wsData.push(['计划周期', (plan.startDate || '') + ' ~ ' + (plan.endDate || '')]);
+  if (projectName()) wsData.push(['关联项目', projectName()]);
+  if (plan.createdBy) wsData.push(['填报人', memberName(plan.createdBy)]);
+  var submittedAt = plan.submitted_at || plan.created_at;
+  if (submittedAt) wsData.push(['提交时间', formatDateTime(submittedAt)]);
+  wsData.push(['']);
+  wsData.push(['#', '计划工作内容', '责任人', '计划完成时间']);
+
+  var tasks = (plan.tasks || []).filter(function (t) { return (t.title || '').trim(); });
+  if (tasks.length === 0) {
+    wsData.push(['-', '无任务记录', '', '']);
+  } else {
+    tasks.forEach(function (t, idx) {
+      wsData.push([idx + 1, t.title || '', memberName(t.ownerId), t.dueDate || '-']);
+    });
+  }
+  wsData.push(['']);
+  wsData.push(['导出时间', formatDateTime(new Date())]);
+
+  var ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 4 }, { wch: 44 }, { wch: 16 }, { wch: 22 }];
+
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '周计划工作');
+
+  var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
+  var blob = new Blob([wbout], { type: 'application/octet-stream' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = '周计划工作安排_' + (plan.startDate || formatDateStr(new Date())) + '.xlsx';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Excel 已导出');
+  if (onDone) onDone();
+}
+
 window.exportReportToExcel = exportReportToExcel;
 window.exportDailyPlanToExcel = exportDailyPlanToExcel;
+window.exportWeeklyPlanToExcel = exportWeeklyPlanToExcel;

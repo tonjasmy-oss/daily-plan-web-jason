@@ -32,7 +32,8 @@ var PB_STATUS_CLASS = {
 };
 
 var PB_SVG_CLOSE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-var PB_SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" cy="9.5" r="1.6" stroke="currentColor" stroke-width="1.6"/><path d="M4 17l4.5-4.5L13 17l3-2.5 4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+var PB_SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="9.5" r="1.6" stroke="currentColor" stroke-width="1.6"/><path d="M4 17l4.5-4.5L13 17l3-2.5 4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+var PB_SVG_EXCEL = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 12.5l4 5M13.5 12.5l-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 
 /* ------------------------------------------------------------
  * 数据源 (common.js 内存缓存, 登录时随 bootstrap 一起加载)
@@ -279,6 +280,37 @@ function pbFullHref(rec, tab) {
 }
 
 /* ------------------------------------------------------------
+ * 导出 Excel
+ *   复用 assets/export-excel.js (SheetJS)
+ *   日计划: 沿用填报页的业务规则 —— 仅「已通过」可导出
+ * ------------------------------------------------------------ */
+function pbExportable(tab) {
+  return tab === 'daily' || tab === 'weekly' || tab === 'report';
+}
+function pbExportBlockedReason(rec, tab) {
+  if (tab === 'daily' && (rec.status || 'draft') !== 'approved') return '仅审批通过的日计划可导出 Excel';
+  return '';
+}
+function pbExport(rec, tab) {
+  var blocked = pbExportBlockedReason(rec, tab);
+  if (blocked) { toast(blocked, 'warn'); return; }
+  if (tab === 'daily') {
+    if (typeof exportDailyPlanToExcel !== 'function') { toast('Excel 模块未加载', 'error'); return; }
+    exportDailyPlanToExcel(rec, loadMembers() || []);
+    return;
+  }
+  if (tab === 'weekly') {
+    if (typeof exportWeeklyPlanToExcel !== 'function') { toast('Excel 模块未加载', 'error'); return; }
+    exportWeeklyPlanToExcel(rec, loadMembers() || []);
+    return;
+  }
+  if (tab === 'report') {
+    if (typeof exportReportToExcel !== 'function') { toast('Excel 模块未加载', 'error'); return; }
+    exportReportToExcel(rec);
+  }
+}
+
+/* ------------------------------------------------------------
  * 详情弹层
  * ------------------------------------------------------------ */
 function pbCloseDetail() {
@@ -289,6 +321,13 @@ function pbOpenDetail(rec, tab, opts) {
   pbCloseDetail();
 
   var full = pbFullHref(rec, tab);
+  var blocked = pbExportBlockedReason(rec, tab);
+  var exportBtn = !pbExportable(tab) ? '' :
+    '<button class="btn btn-success pb-export" type="button"' +
+      (blocked ? ' disabled title="' + esc(blocked) + '"' : '') + '>' +
+      PB_SVG_EXCEL + '<span>导出 Excel</span>' +
+    '</button>';
+
   var ov = document.createElement('div');
   ov.className = 'modal-overlay pb-overlay';
   ov.setAttribute('tabindex', '-1');
@@ -302,7 +341,10 @@ function pbOpenDetail(rec, tab, opts) {
         '</span>' +
       '</div>' +
       '<div class="modal-body">' + pbDetailHtml(rec, tab) + '</div>' +
-      '<div class="modal-footer"><button class="btn-secondary pb-close" type="button">关闭</button></div>' +
+      '<div class="modal-footer">' +
+        exportBtn +
+        '<button class="btn-secondary pb-close" type="button">关闭</button>' +
+      '</div>' +
     '</div>';
   document.body.appendChild(ov);
 
@@ -316,6 +358,13 @@ function pbOpenDetail(rec, tab, opts) {
   }
   ov.querySelector('.modal-close').onclick = close;
   ov.querySelector('.pb-close').onclick = close;
+  var expBtn = ov.querySelector('.pb-export');
+  if (expBtn) {
+    expBtn.onclick = function () {
+      if (expBtn.disabled) { toast(pbExportBlockedReason(rec, tab) || '当前记录不可导出', 'warn'); return; }
+      pbExport(rec, tab);
+    };
+  }
   ov.addEventListener('mousedown', function (e) { if (e.target === ov) ov._bg = true; });
   ov.addEventListener('click', function (e) {
     if (e.target === ov && ov._bg) { ov._bg = false; close(); }
