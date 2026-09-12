@@ -130,14 +130,27 @@ async function initDailyPlanPage() {
         date: existing.date || urlDate,
         plan_date: existing.plan_date || existing.date || urlDate,
         tasks: (existing.tasks && existing.tasks.length > 0)
-          ? existing.tasks.map(function (t) { return {
-              id: t.id || uuid().substring(0, 8),
-              content: t.content || '',
-              requirement: t.requirement || '',
-              members: Array.isArray(t.members) ? t.members.slice() : [],
-              startTime: t.startTime || '',
-              endTime: t.endTime || ''
-            }; })
+          ? existing.tasks.map(function (t) {
+              var base = {
+                id: t.id || uuid().substring(0, 8),
+                content: t.content || '',
+                requirement: t.requirement || '',
+                members: Array.isArray(t.members) ? t.members.slice() : [],
+                startTime: t.startTime || '',
+                endTime: t.endTime || ''
+              };
+              /* ⚠️ 审批追加的条目必须原样带回标记。
+               * 这里只挑固定字段重建, 若漏掉 appended/appended_by/appended_at,
+               * 审批人在本页点「通过」触发一次 persist() 就会把追加标记永久抹掉,
+               * 追加内容会退化成普通任务 (内容还在, 但来源/标签全丢)。 */
+              if (t.appended) {
+                base.appended = true;
+                base.appended_by = t.appended_by || '';
+                base.appended_at = t.appended_at || '';
+                base.title = t.title || base.content;
+              }
+              return base;
+            })
           : [newTask()],
         crew: {
           night:  Array.isArray(existing.crew && existing.crew.night)  ? existing.crew.night.slice()  : [],

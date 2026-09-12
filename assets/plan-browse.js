@@ -1,5 +1,5 @@
 /* ============================================================
- * 报表浏览 — 日计划 / 周计划 / 计划月报 / 日常日报
+ * 报表浏览 — 日计划 / 周计划 / 计划月报 / 计划周报 / 日常日报
  *
  * 交互:
  *   - 列表行点「查看」→ 在当前页打开详情弹层(不跳转)
@@ -13,6 +13,7 @@ var PB_TABS = [
   { id: 'daily',   label: '日计划' },
   { id: 'weekly',  label: '周计划' },
   { id: 'monthly', label: '计划月报' },
+  { id: 'wr',      label: '计划周报' },
   { id: 'report',  label: '日常日报' }
 ];
 
@@ -20,6 +21,7 @@ var PB_EMPTY_TEXT = {
   daily:   '尚无日计划填报',
   weekly:  '尚无周计划填报',
   monthly: '尚无计划月报',
+  wr:      '尚无计划周报',
   report:  '尚无日报记录'
 };
 
@@ -49,8 +51,13 @@ function loadReports() {
 function pbList(tab) {
   if (tab === 'daily')  return loadDailyPlans()  || [];
   if (tab === 'weekly') return loadWeeklyPlans() || [];
+  if (tab === 'wr')     return loadWeeklyReports() || [];
   if (tab === 'report') return loadReports()     || [];
   return [];   /* 计划月报: 暂未接入数据源 */
+}
+/* 该 tab 的审批追加条目挂在哪个数组字段上 (周报没有任务列表, 用 items) */
+function pbAppendCount(rec, tab) {
+  return planAppendedCount(rec, planAppendField(tab));
 }
 
 /* ------------------------------------------------------------
@@ -108,6 +115,11 @@ function pbTitle(rec, tab) {
     var s = rec.startDate || '', e = rec.endDate || '';
     return (s || e) ? (s + ' ~ ' + e) : '周计划';
   }
+  /* 计划周报: 周期同样取起止日期 */
+  if (tab === 'wr') {
+    var ws = rec.week_start || '', we = rec.week_end || '';
+    return (ws || we) ? (ws + ' ~ ' + we) : '计划周报';
+  }
   /* 日报表: 审批通过后显示「{计划工作日期}年月日计划工作完成情况」 */
   if (tab === 'report') return reportDisplayTitle(rec);
   return rec.date || '(无日期)';
@@ -123,6 +135,13 @@ function pbSub(rec, tab) {
     return (p ? p + ' · ' : '') + (rec.tasks || []).length + ' 项任务 · ' +
       (PB_PLAN_STATUS[rec.status || 'draft'] || '草稿');
   }
+  if (tab === 'wr') {
+    var sum = (rec.summary || '').replace(/\s+/g, ' ').trim();
+    var apN = pbAppendCount(rec, tab);
+    return (sum.length > 34 ? sum.slice(0, 34) + '…' : (sum || '无摘要')) +
+      ' · ' + (PB_PLAN_STATUS[rec.status || 'draft'] || '草稿') +
+      (apN ? ' · 审批追加 ' + apN + ' 条' : '');
+  }
   if (tab === 'report') {
     var cats = [];
     if (rec.categories && rec.categories.plan) cats.push('计划工作');
@@ -135,6 +154,7 @@ function pbSub(rec, tab) {
 function pbRowTag(rec, tab) {
   if (tab === 'daily') return pbStatusTag(rec.status, PB_DAILY_STATUS);
   if (tab === 'weekly') return pbStatusTag(rec.status || 'draft', PB_PLAN_STATUS);
+  if (tab === 'wr') return pbStatusTag(rec.status || 'draft', PB_PLAN_STATUS);
   if (tab === 'report') return pbStatusTag(rec.status, REPORT_STATUS_TEXT);
   return '';
 }
@@ -287,9 +307,51 @@ function pbReportDetail(rec) {
     pbBlock('签名', '', sign);
 }
 
+/* 审批追加的条目列表 (周报 / 计划类记录共用) */
+function pbAppendList(items) {
+  var rows = (items || []).filter(function (t) { return t && t.appended; });
+  if (!rows.length) return '';
+  return '<div class="pb-append-list">' + rows.map(function (t) {
+    var text = t.content || t.title || '';
+    var who = t.appended_by ? '审批追加 · ' + esc(t.appended_by) : '审批追加';
+    var when = t.appended_at ? ' · ' + esc(pbTime(t.appended_at)) : '';
+    return '<div class="pb-append-item">' +
+      '<span class="pb-append-ord">补</span>' +
+      '<div class="pb-append-main">' +
+        '<div class="pb-append-meta">' + who + when + '</div>' +
+        '<div class="pb-append-text">' + esc(text) + '</div>' +
+      '</div></div>';
+  }).join('') + '</div>';
+}
+
+/* 计划周报: 周期 + 工作摘要 + 审批补充事项 */
+function pbWeeklyReportDetail(rec) {
+  var st = rec.status || 'draft';
+  var meta = '<div class="pb-meta-grid">' +
+    pbMeta('周期', esc([rec.week_start, rec.week_end].filter(Boolean).join(' ~ '))) +
+    pbMeta('状态', pbStatusTag(st, PB_PLAN_STATUS)) +
+    pbMeta('提交人', esc(pbName(rec.submitter))) +
+    pbMeta('提交时间', esc(pbTime(rec.submitted_at || rec.created_at))) +
+    pbMeta('审批人', esc(pbName(rec.approver) || rec.approver)) +
+    (st === 'rejected'
+      ? pbMeta('驳回时间', esc(pbTime(rec.rejected_at))) + pbMeta('驳回原因', esc(rec.rejected_reason))
+      : pbMeta('审批时间', esc(pbTime(rec.approved_at)))) +
+    '</div>';
+
+  var apN = pbAppendCount(rec, 'wr');
+  return meta +
+    pbBlock('本周工作摘要', '', '<div class="pb-remarks">' +
+      (esc(rec.summary) || '<span class="muted">无</span>') + '</div>') +
+    (apN
+      ? pbBlock('审批补充事项', '共 ' + apN + ' 条', pbAppendList(rec.items) +
+          '<div class="pb-append-note">审批人在通过前追加的内容，随周报一并归档</div>')
+      : '');
+}
+
 function pbDetailHtml(rec, tab) {
   if (tab === 'daily')  return pbDailyDetail(rec);
   if (tab === 'weekly') return pbWeeklyDetail(rec);
+  if (tab === 'wr')     return pbWeeklyReportDetail(rec);
   if (tab === 'report') return pbReportDetail(rec);
   return '<div class="pb-none">计划月报暂未开放浏览</div>';
 }
@@ -342,31 +404,37 @@ function pbExport(rec, tab) {
  * 会清空页面里所有 .modal-overlay, 在详情弹层之上再开弹窗会把详情一起销毁。
  * 因此这里的审批操作全部内联在详情弹层内部, 不复用那些对话框。
  * ------------------------------------------------------------ */
-/* 把变更就地写回记录与服务器 (日计划 / 周计划) */
+/* 把变更就地写回记录与服务器 (日计划 / 周计划 / 计划周报) */
 function pbSavePlan(rec, tab, patch) {
   if (!rec) return;
   if (patch) Object.assign(rec, patch);
   if (tab === 'daily') updateDailyPlan(rec._id, rec);
   else if (tab === 'weekly') updateWeeklyPlan(rec._id, rec);
+  else if (tab === 'wr') updateWeeklyReport(rec._id, rec);
 }
 
 /* 审批操作区: 仅「审批人 + 待审批」时出现 */
 function pbApproveBox(rec, tab) {
-  if (tab !== 'daily' && tab !== 'weekly') return '';
+  if (tab !== 'daily' && tab !== 'weekly' && tab !== 'wr') return '';
   var user = (typeof getCurrentUser === 'function') ? getCurrentUser() : null;
   if (!planAppendable(rec, user)) return '';
-  var n = planAppendedCount(rec);
+  var n = planAppendedCount(rec, planAppendField(tab));
+  /* 周报是本周工作总结, 审批人追加的读作「补充事项」更贴切 */
+  var isWr = tab === 'wr';
+  var fieldLabel = isWr ? '补充事项' : '追加工作内容';
+  var addLabel = isWr ? '+ 追加到周报' : '+ 追加到计划';
   return '<div class="pb-approve-box">' +
     '<div class="pb-approve-head">审批操作' +
       '<span class="sec-meta">' + (n ? '已追加 ' + n + ' 条 · ' : '') +
-      '可先追加工作内容再通过</span></div>' +
+      (isWr ? '可先追加补充事项再通过' : '可先追加工作内容再通过') + '</span></div>' +
     '<div class="pb-approve-cols">' +
       '<div class="pb-approve-col">' +
-        '<label class="pb-approve-label" for="pbAppendInput">追加工作内容 <span class="pb-approve-opt">选填 · 一行一条</span></label>' +
+        '<label class="pb-approve-label" for="pbAppendInput">' + fieldLabel +
+          ' <span class="pb-approve-opt">选填 · 一行一条</span></label>' +
         '<textarea class="textarea pb-append-input" id="pbAppendInput" rows="2" ' +
-          'placeholder="例如：补充检查 3 层临边防护"></textarea>' +
+          'placeholder="' + (isWr ? '例如：下周需同步提交消防验收资料' : '例如：补充检查 3 层临边防护') + '"></textarea>' +
         '<div class="pb-approve-row">' +
-          '<button class="btn btn-default pb-append" type="button">+ 追加到计划</button>' +
+          '<button class="btn btn-default pb-append" type="button">' + addLabel + '</button>' +
         '</div>' +
       '</div>' +
       '<div class="pb-approve-col">' +
@@ -464,10 +532,10 @@ function pbOpenDetail(rec, tab, opts) {
   var appendBtn = ov.querySelector('.pb-append');
   if (appendBtn) appendBtn.onclick = function () {
     var ta = ov.querySelector('.pb-append-input');
-    var n = planAppendTasks(rec, ta && ta.value, getCurrentUser());
-    if (n === 0) { toast('请填写要追加的工作内容', 'warn'); return; }
-    pbSavePlan(rec, tab);                       /* 内容已写入 rec.tasks, 这里落库 */
-    toast('已追加 ' + n + ' 条工作内容', 'success');
+    var n = planAppendTasks(rec, ta && ta.value, getCurrentUser(), planAppendField(tab));
+    if (n === 0) { toast('请填写要追加的内容', 'warn'); return; }
+    pbSavePlan(rec, tab);                       /* 内容已写入 rec 的条目数组, 这里落库 */
+    toast('已追加 ' + n + ' 条' + (tab === 'wr' ? '补充事项' : '工作内容'), 'success');
     if (window.pbRefreshList) window.pbRefreshList();
     pbOpenDetail(rec, tab, { keepUrl: true });
   };
@@ -534,7 +602,7 @@ async function initPlanBrowsePage() {
     pageHtml:
       '<nav class="breadcrumb"><a href="dashboard.html">工作台</a><span class="sep">/</span><span>报表浏览</span></nav>' +
       '<div class="page-header"><div><h2>报表浏览</h2>' +
-        '<div class="page-sub">查看已填报的日计划 / 周计划 / 日常日报，点击右侧「查看」展开详情，并可按需导出 Excel / 图片 / PDF' +
+        '<div class="page-sub">查看已填报的日计划 / 周计划 / 计划周报 / 日常日报，点击右侧「查看」展开详情，并可按需导出 Excel / 图片 / PDF' +
         (canApprovePlan(user) ? '；待审批的计划可直接在详情中追加工作内容并审批' : '') + '</div></div></div>' +
       '<div class="tabs" id="pbTabs">' + PB_TABS.map(function (t) {
         var n = pbList(t.id).length;

@@ -40,6 +40,7 @@ async function initWeeklyPlanPage() {
       '<span>任务数</span><strong id="wpCount">0</strong>' +
       '<span>周期</span><strong>7 天</strong>' +
       '</div></div>' +
+      '<div class="plan-approve-note">提交后进入审批流程，审批人可在通过前追加工作内容；审批通过后可在「报表浏览 → 周计划」查看，不可修改。</div>' +
       '<div class="section"><h3>基础信息</h3><div class="form-grid">' +
       '<div class="field-row"><label class="field-label"><span class="required">*</span>关联项目</label>' +
       '<select class="input" id="wpProject"><option value="">-- 选择项目 --</option>' + projectOptions + '</select>' +

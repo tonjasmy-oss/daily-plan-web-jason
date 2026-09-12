@@ -539,6 +539,7 @@ function createPurchase(data) {
   var rec = Object.assign({
     _id: 'pu_' + uuid(),
     date: todayStr(), name: '', spec: '', unit: '', qty: '',
+    total: 0, items: [], projectId: '',
     reason: '', status: 'draft',
     applicant: '', approver: '',
     created_at: new Date().toISOString()
@@ -827,7 +828,7 @@ function reportDisplayTitle(rec) {
 }
 
 /* ============================================================
- * 计划审批 (日计划 / 周计划共用)
+ * 计划审批 (日计划 / 周计划 / 计划周报共用)
  *
  * 流程:
  *   填报人提交 -> status='pending'(待审批)
@@ -836,9 +837,13 @@ function reportDisplayTitle(rec) {
  *   审批人驳回 -> status='rejected', 填报人可修改后重新提交
  *
  * 审批人 = 主管以上 (admin / manager), 与日计划填报页原有规则保持一致
+ *
+ * 追加条目存放位置随记录类型不同 (见 planAppendField):
+ *   日计划 / 周计划 -> tasks[]   计划周报 -> items[] (周报没有任务列表)
  * ============================================================ */
 var PLAN_APPROVE_ROLES = ['admin', 'manager'];
-var PLAN_STATUS_TEXT = { draft: '草稿', pending: '待审批', approved: '已通过', rejected: '已驳回' };
+/* submitted 是计划周报改版前的旧状态值, 保留映射只为让老数据仍能正常显示 */
+var PLAN_STATUS_TEXT = { draft: '草稿', pending: '待审批', approved: '已通过', rejected: '已驳回', submitted: '已提交' };
 
 /* 当前用户是否具备计划类表单的审批权 */
 function canApprovePlan(user) {
@@ -865,20 +870,29 @@ function makeAppendedTask(content, user) {
   };
 }
 
-/* 逐行追加工作内容到计划记录, 返回成功追加的条数 (空行忽略) */
-function planAppendTasks(rec, text, user) {
+/* 审批追加条目挂在记录的哪个数组字段上
+ *   日计划 / 周计划 -> tasks; 计划周报没有任务列表, 用一直空置的 items */
+function planAppendField(tab) {
+  return tab === 'wr' ? 'items' : 'tasks';
+}
+
+/* 逐行追加工作内容到记录, 返回成功追加的条数 (空行忽略)
+ * field 省略时按 tasks 处理, 保持既有调用不变 */
+function planAppendTasks(rec, text, user, field) {
   if (!rec) return 0;
+  var key = field || 'tasks';
   var lines = String(text || '').split(/\r?\n/).map(function (s) { return s.trim(); })
     .filter(function (s) { return !!s; });
   if (lines.length === 0) return 0;
-  if (!Array.isArray(rec.tasks)) rec.tasks = [];
-  lines.forEach(function (line) { rec.tasks.push(makeAppendedTask(line, user)); });
+  if (!Array.isArray(rec[key])) rec[key] = [];
+  lines.forEach(function (line) { rec[key].push(makeAppendedTask(line, user)); });
   return lines.length;
 }
 
-/* 记录里被审批追加的条目数 */
-function planAppendedCount(rec) {
-  return ((rec && rec.tasks) || []).filter(function (t) { return t && t.appended; }).length;
+/* 记录里被审批追加的条目数 (field 省略时按 tasks 处理) */
+function planAppendedCount(rec, field) {
+  var key = field || 'tasks';
+  return ((rec && rec[key]) || []).filter(function (t) { return t && t.appended; }).length;
 }
 
 /* ===== HTML 转义 ===== */

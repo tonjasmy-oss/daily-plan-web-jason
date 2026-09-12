@@ -3088,15 +3088,46 @@ table.data-table {
   .pb-export-group .btn { flex: 1 1 auto; justify-content: center; }
 }
 
-/* 计划周报: 留档行(不可跳转) */
-.wr-row { cursor: default; }
-.wr-row:hover { border-color: var(--border); }
+/* 计划周报: 留档行 (点行跳到「报表浏览 → 计划周报」查看/审批) */
+.wr-row { align-items: center; }
+
+/* ============================================================
+ * 物资申购 (v8) — 草稿箱 + 单位可手输 + 焦点不抖动
+ * ============================================================ */
+/* 顶部 "正在编辑某条草稿/驳回" 提示块 */
+.pc-editing-banner {
+  margin: 0 0 16px; padding: 0;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--text);
+}
+.pc-editing-banner[hidden] { display: none !important; }
+.pc-editing-inner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px; font-size: 13px; line-height: 1.6;
+}
+.pc-editing-inner > span { flex: 1 1 auto; min-width: 0; }
+/* 物资申购我的列表 */
+.pc-my-row { align-items: center; }
+.pc-my-row .chip { background: var(--bg-input); color: var(--text-secondary); }
 
 /* ============================================================
  * 审批追加工作内容 (v8)
- *   日计划 / 周计划提交后, 审批人可在通过前追加工作内容,
- *   追加条目以「审批追加」标记区分, 通过后随计划一并归档
+ *   日计划 / 周计划 / 计划周报提交后, 审批人可在通过前追加内容,
+ *   追加条目以「审批追加」标记区分, 通过后随记录一并归档
  * ============================================================ */
+/* 填报页顶部的审批流程说明 (周计划填报 / 计划周报共用) */
+.plan-approve-note {
+  margin: 0 0 18px; padding: 10px 14px;
+  border: 1px solid rgba(88, 101, 242, 0.28);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius);
+  background: rgba(88, 101, 242, 0.06);
+  color: var(--text-secondary); font-size: 13px; line-height: 1.6;
+}
 /* 日计划填报页: 追加条目单独渲染 */
 .rp-task-row-appended {
   border-left: 3px solid var(--warning);
@@ -3135,6 +3166,29 @@ table.data-table {
   background: var(--warning-bg); color: var(--warning);
   font-size: 11px; font-weight: 600; white-space: nowrap;
 }
+/* 报表浏览: 详情里的「审批追加」条目列表 (计划周报用) */
+.pb-append-list { display: flex; flex-direction: column; gap: 10px; }
+.pb-append-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  background: rgba(245, 158, 11, 0.06);
+}
+.pb-append-ord {
+  flex: 0 0 auto; width: 22px; height: 22px; margin-top: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; font-size: 11px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, var(--warning), #F0A020);
+}
+.pb-append-main { flex: 1 1 auto; min-width: 0; }
+.pb-append-meta { font-size: 11px; color: var(--warning); font-weight: 600; margin-bottom: 4px; }
+.pb-append-text {
+  font-size: 13px; line-height: 1.6; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+.pb-append-note { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+
 /* 报表浏览: 详情里的内联审批区 (不能用弹窗, 会连带销毁详情弹层) */
 .pb-approve-box {
   margin-top: 18px; padding: 16px;

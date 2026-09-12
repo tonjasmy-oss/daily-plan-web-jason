@@ -173,6 +173,9 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
   submitted_at TEXT DEFAULT '',
   approver TEXT DEFAULT '',
   approved_at TEXT DEFAULT '',
+  rejected_at TEXT DEFAULT '',
+  rejected_reason TEXT DEFAULT '',
+  reviewed_by TEXT DEFAULT '',
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
@@ -183,6 +186,9 @@ CREATE TABLE IF NOT EXISTS purchases (
   spec TEXT DEFAULT '',
   unit TEXT DEFAULT '',
   qty TEXT DEFAULT '',
+  total REAL DEFAULT 0,
+  items_json TEXT DEFAULT '[]',
+  project_id TEXT DEFAULT '',
   reason TEXT DEFAULT '',
   status TEXT DEFAULT 'draft',
   applicant TEXT DEFAULT '',
@@ -359,14 +365,24 @@ def row_to_weekly_report(r):
         'items': json.loads(r['items_json'] or '[]'),
         'submitter': r['submitter'], 'submitted_at': r['submitted_at'],
         'approver': r['approver'], 'approved_at': r['approved_at'],
+        'rejected_at': _col(r, 'rejected_at', ''),
+        'rejected_reason': _col(r, 'rejected_reason', ''),
+        'reviewed_by': _col(r, 'reviewed_by', ''),
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
     }
 
 
 def row_to_purchase(r):
+    try:
+        items = json.loads(r['items_json'] or '[]')
+    except Exception:
+        items = []
     return {
         '_id': r['id'], 'date': r['date'], 'name': r['name'],
         'spec': r['spec'], 'unit': r['unit'], 'qty': r['qty'],
+        'total': float(r['total'] or 0),
+        'items': items,
+        'projectId': r['project_id'] if 'project_id' in r.keys() else '',
         'reason': r['reason'], 'status': r['status'],
         'applicant': r['applicant'], 'approver': r['approver'],
         'approved_at': r['approved_at'],
@@ -435,6 +451,16 @@ def migrate_db():
                 ('project_id', "TEXT DEFAULT ''"),
                 ('tasks_json', "TEXT DEFAULT '[]'"),
                 ('created_by', "TEXT DEFAULT ''"),
+            ],
+            'weekly_reports': [
+                ('rejected_at', "TEXT DEFAULT ''"),
+                ('rejected_reason', "TEXT DEFAULT ''"),
+                ('reviewed_by', "TEXT DEFAULT ''"),
+            ],
+            'purchases': [
+                ('total', "REAL DEFAULT 0"),
+                ('items_json', "TEXT DEFAULT '[]'"),
+                ('project_id', "TEXT DEFAULT ''"),
             ],
         }
         for table, cols in new_cols.items():
@@ -811,15 +837,17 @@ def upsert_weekly_report(conn, data):
               data.get('summary', ''),
               json.dumps(data.get('items', []), ensure_ascii=False),
               data.get('submitter', ''), data.get('submitted_at', ''),
-              data.get('approver', ''), data.get('approved_at', ''))
+              data.get('approver', ''), data.get('approved_at', ''),
+              data.get('rejected_at', ''), data.get('rejected_reason', ''),
+              data.get('reviewed_by', ''))
     old = conn.execute('SELECT id FROM weekly_reports WHERE id=?', (wid,)).fetchone()
     if old:
         conn.execute(
-            'UPDATE weekly_reports SET week_start=?,week_end=?,title=?,status=?,summary=?,items_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
+            'UPDATE weekly_reports SET week_start=?,week_end=?,title=?,status=?,summary=?,items_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,updated_at=? WHERE id=?',
             fields + (now, wid))
     else:
         conn.execute(
-            'INSERT INTO weekly_reports (id,week_start,week_end,title,status,summary,items_json,submitter,submitted_at,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO weekly_reports (id,week_start,week_end,title,status,summary,items_json,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (wid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return wid
@@ -831,18 +859,22 @@ def upsert_purchase(conn, data):
     now = now_iso()
     fields = (data.get('date', ''), data.get('name', ''),
               data.get('spec', ''), data.get('unit', ''),
-              data.get('qty', ''), data.get('reason', ''),
+              data.get('qty', ''),
+              float(data.get('total') or 0),
+              json.dumps(data.get('items', []) or [], ensure_ascii=False),
+              data.get('projectId') or data.get('project_id', ''),
+              data.get('reason', ''),
               data.get('status', 'draft'),
               data.get('applicant', ''), data.get('approver', ''),
               data.get('approved_at', ''))
     old = conn.execute('SELECT id FROM purchases WHERE id=?', (pid,)).fetchone()
     if old:
         conn.execute(
-            'UPDATE purchases SET date=?,name=?,spec=?,unit=?,qty=?,reason=?,status=?,applicant=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
+            'UPDATE purchases SET date=?,name=?,spec=?,unit=?,qty=?,total=?,items_json=?,project_id=?,reason=?,status=?,applicant=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
             fields + (now, pid))
     else:
         conn.execute(
-            'INSERT INTO purchases (id,date,name,spec,unit,qty,reason,status,applicant,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO purchases (id,date,name,spec,unit,qty,total,items_json,project_id,reason,status,applicant,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (pid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return pid
