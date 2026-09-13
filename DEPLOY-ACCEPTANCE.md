@@ -98,16 +98,34 @@ tail -f /opt/daily-plan-web-jason/server/service.log   # 实时日志
 curl -I http://127.0.0.1:31118/login.html              # 服务器本地自测
 ```
 
-**代码更新流程**（服务器上，仓库为公开库可直接拉）：
+**代码更新流程（一行版）**——服务器上执行，仓库为公开库可直接拉：
 
 ```bash
-cd /tmp && rm -rf dpwj && git clone --depth 1 https://github.com/tonjasmy-oss/daily-plan-web-jason.git dpwj
-sudo cp -r /tmp/dpwj/assets /tmp/dpwj/*.html /opt/daily-plan-web-jason/
-sudo cp /tmp/dpwj/server/app.py /opt/daily-plan-web-jason/server/app.py
-sudo systemctl restart daily-plan
+cd /tmp && rm -rf dpwj && git clone --depth 1 https://github.com/tonjasmy-oss/daily-plan-web-jason.git dpwj && sudo cp -rf dpwj/assets/. /opt/daily-plan-web-jason/assets/ && sudo cp -f dpwj/*.html /opt/daily-plan-web-jason/ && sudo cp -f dpwj/server/app.py /opt/daily-plan-web-jason/server/app.py && sudo chown -R ubuntu:ubuntu /opt/daily-plan-web-jason && sudo systemctl restart daily-plan && echo "=== UPDATED ===" && curl -sI http://127.0.0.1:31118/login.html | head -1
 ```
 
-> 注意：**不要覆盖 `/opt/daily-plan-web-jason/server/data.db`**，那是线上数据。
+看到 `=== UPDATED ===` 和 `HTTP/1.0 200 OK` 即成功。
+
+> **国内机器拉 GitHub 卡住**时，把 `https://github.com/...` 换成
+> `https://ghfast.top/https://github.com/...` 再跑一次。
+> 服务器没装 git 时先执行 `sudo apt-get install -y git`。
+
+> ⚠️ 该命令只覆盖 `assets/`、`*.html`、`server/app.py` 三类，
+> **绝不触碰 `server/data.db`**（线上数据）。手动操作时务必注意。
+
+**改动生效范围**：
+
+| 类型 | 是否需重启 |
+|---|---|
+| 前端（`assets/*.js`、`*.html`） | 不需要，静态文件每次请求现读磁盘 |
+| 后端（`server/app.py`） | **必须** `sudo systemctl restart daily-plan` |
+
+**线上更新记录**：
+
+| 日期 | 内容 | 对应提交 |
+|---|---|---|
+| 2026-09-13 | 首次部署（全量） | 包内为 `0f9f222` 版本 |
+| 2026-09-13 | 审批管理接真实计划数据 + 报表浏览按审批状态收口（前端 5 个文件） | `dd3a5a1` |
 
 ---
 
@@ -117,5 +135,6 @@ sudo systemctl restart daily-plan
 |---|---|---|
 | 外网打不开、服务器本地 `curl` 正常 | 腾讯云安全组未放行 | 控制台加 `TCP:31118` / `0.0.0.0/0` |
 | `\r: command not found` | 脚本被转成 CRLF | 仓库已加 `.gitattributes` 锁 LF；重新拉取即可 |
-| 改动不生效 | 后端代码每次请求现读，但进程需重启 | `sudo systemctl restart daily-plan` |
+| 后端（app.py）改动不生效 | 代码由进程加载，改动需重启 | `sudo systemctl restart daily-plan` |
+| 前端改动不生效 | 浏览器缓存旧 JS | `Ctrl + F5` 强制刷新（静态文件本身每次请求现读磁盘，无需重启） |
 | 服务起不来 | 端口被占 | `sudo ss -lntp \| grep 31118` 查占用进程 |
