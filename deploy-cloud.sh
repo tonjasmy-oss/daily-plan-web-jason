@@ -30,9 +30,23 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-REAL_USER="${SUDO_USER:-root}"
+REAL_USER="${SUDO_USER:-}"
+if [ -z "${REAL_USER}" ] || [ "${REAL_USER}" = "root" ]; then
+  # When invoked as root directly (e.g. after "sudo -i"), pick a normal
+  # user to run the service, so the web app never runs as root.
+  REAL_USER=""
+  for u in ubuntu debian admin centos ec2-user; do
+    if id "${u}" >/dev/null 2>&1; then
+      REAL_USER="${u}"
+      break
+    fi
+  done
+  [ -z "${REAL_USER}" ] && REAL_USER="root"
+fi
 REAL_HOME="$(getent passwd "${REAL_USER}" | cut -d: -f6)"
 [ -z "${REAL_HOME}" ] && REAL_HOME="/root"
+
+echo "      Service will run as user: ${REAL_USER}  (home: ${REAL_HOME})"
 
 APP_DIR=""
 for d in "/opt/daily-plan-web-jason" "${REAL_HOME}/daily-plan-web-jason" "/root/daily-plan-web-jason"; do
