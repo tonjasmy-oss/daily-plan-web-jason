@@ -61,6 +61,12 @@ function openSignaturePad(opts) {
     }
   }
   resize();
+  /* 横竖屏切换 / 键盘弹起 (地址栏收缩) 会改变 innerHeight, 必须监听 resize 重算画板 */
+  window.addEventListener('resize', resize);
+  /* visualViewport 在 iOS Safari 13+ 键盘弹起时也会触发 (比 resize 更精确) */
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+  }
 
   function pos(e) {
     var rect = canvas.getBoundingClientRect();
@@ -99,6 +105,11 @@ function openSignaturePad(opts) {
   }
 
   function close() {
+    /* 关闭时移除 resize 监听, 避免泄漏 (打开多次签名的场景) */
+    window.removeEventListener('resize', resize);
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', resize);
+    }
     overlay.remove();
     if (opts.onCancel) opts.onCancel();
   }

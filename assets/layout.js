@@ -18,6 +18,7 @@ var ICONS = {
   logout:    '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   brand:     '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5Z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>',
   back:      '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  analytics: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   dailyPlan: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 15l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   weeklyPlan:'<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="2"/><path d="M3 10h18M8 3v4M16 3v4M9 14h2v2H9zM13 14h2v2h-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   weeklyRpt: '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 4h12l4 4v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 12h8M8 16h6M9 7h6M14 7v4l3-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -31,35 +32,28 @@ var ICONS = {
   about:     '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8h.01M11 12h1v5h1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 };
 
-/* 侧边导航条目
- * 显隐完全由 mod 决定 —— 即「用户角色」里勾选的「可访问模块」,
- * 不再叠加任何按 role key 硬编码的 roles 门 (历史遗留, 已与 roles 表脱节) */
 var NAV_ITEMS = [
-  { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard',  href: 'dashboard.html',     mod: 'm_dashboard',  group: '工作台' },
-  { id: 'daily-plan', label: '日计划填报', icon: 'dailyPlan',  href: 'daily-plan.html',    mod: 'm_daily_plan', group: '填报' },
-  { id: 'weekly-plan',label: '周计划填报', icon: 'weeklyPlan', href: 'weekly-plan.html',   mod: 'm_weekly_plan',group: '填报' },
-  { id: 'report',     label: '日报表填报', icon: 'report',     href: 'report.html',        mod: 'm_report',     group: '填报' },
-  { id: 'weekly-rpt', label: '计划周报',   icon: 'weeklyRpt',  href: 'weekly-report.html', mod: 'm_weekly_rpt', group: '填报' },
-  { id: 'browse',     label: '报表浏览',   icon: 'browse',     href: 'plan-browse.html',   mod: 'm_browse',     group: '填报' },
-  { id: 'purchase',   label: '物资申购',   icon: 'purchase',   href: 'purchase.html',      mod: 'm_purchase',   group: '填报' },
-  { id: 'reports',    label: '历史记录',   icon: 'reports',    href: 'reports.html',       mod: 'm_reports',    group: '管理' },
-  { id: 'approval',   label: '审批管理',   icon: 'approval',   href: 'approval.html',      mod: 'm_approval',   group: '管理' },
-  { id: 'purchase-mgmt', label: '物资管理', icon: 'purchase',  href: 'purchase-mgmt.html', mod: 'm_purchase_mgmt', group: '管理' },
-  { id: 'tasks',      label: '任务看板',   icon: 'tasks',      href: 'tasks.html',         mod: 'm_tasks',      group: '管理' },
-  { id: 'projects',   label: '项目管理',   icon: 'projects',   href: 'projects.html',      mod: 'm_projects',   group: '管理' },
-  { id: 'members',    label: '人员管理',   icon: 'members',    href: 'members.html',       mod: 'm_members',    group: '系统设置' },
-  { id: 'departments',label: '部门管理',   icon: 'dept',       href: 'departments.html',   mod: 'm_departments',group: '系统设置' },
-  { id: 'roles',      label: '用户角色',   icon: 'role',       href: 'roles.html',         mod: 'm_roles',      group: '系统设置' },
-  { id: 'settings',   label: '系统参数',   icon: 'settings',   href: 'settings.html',      mod: 'm_settings',   group: '系统设置' },
-  { id: 'files',      label: '附件管理',   icon: 'files',      href: 'settings-files.html',mod: 'm_files',      group: '系统设置' },
-  { id: 'about',      label: '关于我们',   icon: 'about',      href: 'about.html',         mod: 'm_about',      group: '系统设置' },
-  { id: 'me',         label: '个人中心',   icon: 'me',         href: 'me.html',            mod: 'm_me',         group: '系统设置' }
+  { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard',  href: 'dashboard.html',  roles: null,                  group: '工作台' },
+  { id: 'daily-plan', label: '日计划填报', icon: 'dailyPlan',  href: 'daily-plan.html', roles: null,                  group: '填报' },
+  { id: 'weekly-plan',label: '周计划填报', icon: 'weeklyPlan', href: 'weekly-plan.html',roles: null,                  group: '填报' },
+  { id: 'report',     label: '日报表填报', icon: 'report',     href: 'report.html',     roles: null,                  group: '填报' },
+  { id: 'weekly-rpt', label: '计划周报',   icon: 'weeklyRpt',  href: 'weekly-report.html', roles: null,                group: '填报' },
+  { id: 'browse',     label: '报表浏览',   icon: 'browse',     href: 'plan-browse.html',roles: null,                  group: '填报' },
+  { id: 'purchase',   label: '物资申购',   icon: 'purchase',   href: 'purchase.html',   roles: null,                  group: '填报' },
+  { id: 'reports',    label: '历史记录',   icon: 'reports',    href: 'reports.html',    roles: null,                  group: '管理' },
+  { id: 'approval',   label: '审批管理',   icon: 'approval',   href: 'approval.html',   roles: ['admin','manager'],   group: '管理' },
+  { id: 'purchase-mgmt', label: '物资管理', icon: 'purchase',  href: 'purchase-mgmt.html', roles: ['admin','manager'],group: '管理' },
+  { id: 'analysis',   label: '分析空间',   icon: 'browse',     href: 'analysis.html',   roles: ['admin','manager'],   group: '管理' },
+  { id: 'tasks',      label: '任务看板',   icon: 'tasks',      href: 'tasks.html',      roles: null,                  group: '管理' },
+  { id: 'projects',   label: '项目管理',   icon: 'projects',   href: 'projects.html',   roles: null,                  group: '管理' },
+  { id: 'members',    label: '人员管理',   icon: 'members',    href: 'members.html',    roles: ['admin','manager'],   group: '系统设置' },
+  { id: 'departments',label: '部门管理',   icon: 'dept',       href: 'departments.html',roles: ['admin'],             group: '系统设置' },
+  { id: 'roles',      label: '用户角色',   icon: 'role',       href: 'roles.html',      roles: ['admin'],             group: '系统设置' },
+  { id: 'settings',   label: '系统参数',   icon: 'settings',   href: 'settings.html',   roles: ['admin'],             group: '系统设置' },
+  { id: 'files',      label: '附件管理',   icon: 'files',      href: 'settings-files.html', roles: ['admin'],         group: '系统设置' },
+  { id: 'about',      label: '关于我们',   icon: 'about',      href: 'about.html',      roles: null,                  group: '系统设置' },
+  { id: 'me',         label: '个人中心',   icon: 'me',         href: 'me.html',         roles: null,                  group: '系统设置' }
 ];
-
-/* 暴露给用户角色页的模块清单 (id + label + group, 与 NAV_ITEMS 同步) */
-var MODULES_LIST = NAV_ITEMS.map(function (it) {
-  return { id: it.mod, label: it.label, group: it.group, nav: it.id };
-});
 
 /* ===== Top Nav HTML ===== */
 function renderTopBar(user) {
@@ -83,7 +77,7 @@ function renderTopBar(user) {
       '<div class="topbar-user" id="btnUserMenu" role="button" tabindex="0" title="切换身份">' +
         '<span class="topbar-avatar">' + esc((user.name || '?').charAt(0)) + '</span>' +
         '<span class="topbar-user-name">' +
-          '<b>' + esc(user.name) + '</b> <small>· ' + esc(roleLabel(user.role) || '') + '</small>' +
+          '<b>' + esc(user.name) + '</b> <small>· ' + esc(ROLE_TEXT[user.role] || '') + '</small>' +
         '</span>' +
       '</div>' +
     '</div>' +
@@ -95,7 +89,7 @@ function renderSidebar(user, activeId) {
   /* 按 group 分组 */
   var groups = {};
   NAV_ITEMS.forEach(function (it) {
-    if (it.mod && !canAccessModule(user, it.mod)) return;
+    if (it.roles && it.roles.indexOf(user.role) < 0) return;
     if (!groups[it.group]) groups[it.group] = [];
     groups[it.group].push(it);
   });
