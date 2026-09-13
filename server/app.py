@@ -19,12 +19,25 @@ import os
 import re
 import secrets
 import sqlite3
+import sys
 import threading
 import uuid as _uuid
 import zipfile
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote, quote
+
+
+class ResilientHTTPServer(ThreadingHTTPServer):
+    """守护线程 + 吞掉客户端断开类异常, 避免单个请求异常终结整个服务"""
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionResetError, ConnectionAbortedError,
+                            BrokenPipeError, TimeoutError, OSError)):
+            return  # 客户端断开, 属正常现象
+        super().handle_error(request, client_address)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_ROOT = os.path.dirname(BASE_DIR)
@@ -2802,7 +2815,7 @@ def main():
     seed_if_empty()
     ensure_default_work_types()
     load_sessions()
-    server = ThreadingHTTPServer(('0.0.0.0', port), Handler)
+    server = ResilientHTTPServer(('0.0.0.0', port), Handler)
     print('=' * 52)
     print('  Engineering Management System (DB edition) started')
     print('  Local       : http://localhost:%d' % port)
