@@ -592,7 +592,7 @@ function pbCleanUrl(tab) {
 async function initPlanBrowsePage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_browse')) return;
   var tab = queryParam('tab') || 'daily';
   var validTab = PB_TABS.filter(function (t) { return t.id === tab; }).length > 0;
   if (!validTab) tab = 'daily';

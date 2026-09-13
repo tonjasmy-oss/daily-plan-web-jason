@@ -31,27 +31,35 @@ var ICONS = {
   about:     '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8h.01M11 12h1v5h1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 };
 
+/* 侧边导航条目
+ * 显隐完全由 mod 决定 —— 即「用户角色」里勾选的「可访问模块」,
+ * 不再叠加任何按 role key 硬编码的 roles 门 (历史遗留, 已与 roles 表脱节) */
 var NAV_ITEMS = [
-  { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard',  href: 'dashboard.html',  roles: null,                  group: '工作台' },
-  { id: 'daily-plan', label: '日计划填报', icon: 'dailyPlan',  href: 'daily-plan.html', roles: null,                  group: '填报' },
-  { id: 'weekly-plan',label: '周计划填报', icon: 'weeklyPlan', href: 'weekly-plan.html',roles: null,                  group: '填报' },
-  { id: 'report',     label: '日报表填报', icon: 'report',     href: 'report.html',     roles: null,                  group: '填报' },
-  { id: 'weekly-rpt', label: '计划周报',   icon: 'weeklyRpt',  href: 'weekly-report.html', roles: null,                group: '填报' },
-  { id: 'browse',     label: '报表浏览',   icon: 'browse',     href: 'plan-browse.html',roles: null,                  group: '填报' },
-  { id: 'purchase',   label: '物资申购',   icon: 'purchase',   href: 'purchase.html',   roles: null,                  group: '填报' },
-  { id: 'reports',    label: '历史记录',   icon: 'reports',    href: 'reports.html',    roles: null,                  group: '管理' },
-  { id: 'approval',   label: '审批管理',   icon: 'approval',   href: 'approval.html',   roles: ['admin','manager'],   group: '管理' },
-  { id: 'purchase-mgmt', label: '物资管理', icon: 'purchase',  href: 'purchase-mgmt.html', roles: ['admin','manager'],group: '管理' },
-  { id: 'tasks',      label: '任务看板',   icon: 'tasks',      href: 'tasks.html',      roles: null,                  group: '管理' },
-  { id: 'projects',   label: '项目管理',   icon: 'projects',   href: 'projects.html',   roles: null,                  group: '管理' },
-  { id: 'members',    label: '人员管理',   icon: 'members',    href: 'members.html',    roles: ['admin','manager'],   group: '系统设置' },
-  { id: 'departments',label: '部门管理',   icon: 'dept',       href: 'departments.html',roles: ['admin'],             group: '系统设置' },
-  { id: 'roles',      label: '用户角色',   icon: 'role',       href: 'roles.html',      roles: ['admin'],             group: '系统设置' },
-  { id: 'settings',   label: '系统参数',   icon: 'settings',   href: 'settings.html',   roles: ['admin'],             group: '系统设置' },
-  { id: 'files',      label: '附件管理',   icon: 'files',      href: 'settings-files.html', roles: ['admin'],         group: '系统设置' },
-  { id: 'about',      label: '关于我们',   icon: 'about',      href: 'about.html',      roles: null,                  group: '系统设置' },
-  { id: 'me',         label: '个人中心',   icon: 'me',         href: 'me.html',         roles: null,                  group: '系统设置' }
+  { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard',  href: 'dashboard.html',     mod: 'm_dashboard',  group: '工作台' },
+  { id: 'daily-plan', label: '日计划填报', icon: 'dailyPlan',  href: 'daily-plan.html',    mod: 'm_daily_plan', group: '填报' },
+  { id: 'weekly-plan',label: '周计划填报', icon: 'weeklyPlan', href: 'weekly-plan.html',   mod: 'm_weekly_plan',group: '填报' },
+  { id: 'report',     label: '日报表填报', icon: 'report',     href: 'report.html',        mod: 'm_report',     group: '填报' },
+  { id: 'weekly-rpt', label: '计划周报',   icon: 'weeklyRpt',  href: 'weekly-report.html', mod: 'm_weekly_rpt', group: '填报' },
+  { id: 'browse',     label: '报表浏览',   icon: 'browse',     href: 'plan-browse.html',   mod: 'm_browse',     group: '填报' },
+  { id: 'purchase',   label: '物资申购',   icon: 'purchase',   href: 'purchase.html',      mod: 'm_purchase',   group: '填报' },
+  { id: 'reports',    label: '历史记录',   icon: 'reports',    href: 'reports.html',       mod: 'm_reports',    group: '管理' },
+  { id: 'approval',   label: '审批管理',   icon: 'approval',   href: 'approval.html',      mod: 'm_approval',   group: '管理' },
+  { id: 'purchase-mgmt', label: '物资管理', icon: 'purchase',  href: 'purchase-mgmt.html', mod: 'm_purchase_mgmt', group: '管理' },
+  { id: 'tasks',      label: '任务看板',   icon: 'tasks',      href: 'tasks.html',         mod: 'm_tasks',      group: '管理' },
+  { id: 'projects',   label: '项目管理',   icon: 'projects',   href: 'projects.html',      mod: 'm_projects',   group: '管理' },
+  { id: 'members',    label: '人员管理',   icon: 'members',    href: 'members.html',       mod: 'm_members',    group: '系统设置' },
+  { id: 'departments',label: '部门管理',   icon: 'dept',       href: 'departments.html',   mod: 'm_departments',group: '系统设置' },
+  { id: 'roles',      label: '用户角色',   icon: 'role',       href: 'roles.html',         mod: 'm_roles',      group: '系统设置' },
+  { id: 'settings',   label: '系统参数',   icon: 'settings',   href: 'settings.html',      mod: 'm_settings',   group: '系统设置' },
+  { id: 'files',      label: '附件管理',   icon: 'files',      href: 'settings-files.html',mod: 'm_files',      group: '系统设置' },
+  { id: 'about',      label: '关于我们',   icon: 'about',      href: 'about.html',         mod: 'm_about',      group: '系统设置' },
+  { id: 'me',         label: '个人中心',   icon: 'me',         href: 'me.html',            mod: 'm_me',         group: '系统设置' }
 ];
+
+/* 暴露给用户角色页的模块清单 (id + label + group, 与 NAV_ITEMS 同步) */
+var MODULES_LIST = NAV_ITEMS.map(function (it) {
+  return { id: it.mod, label: it.label, group: it.group, nav: it.id };
+});
 
 /* ===== Top Nav HTML ===== */
 function renderTopBar(user) {
@@ -75,7 +83,7 @@ function renderTopBar(user) {
       '<div class="topbar-user" id="btnUserMenu" role="button" tabindex="0" title="切换身份">' +
         '<span class="topbar-avatar">' + esc((user.name || '?').charAt(0)) + '</span>' +
         '<span class="topbar-user-name">' +
-          '<b>' + esc(user.name) + '</b> <small>· ' + esc(ROLE_TEXT[user.role] || '') + '</small>' +
+          '<b>' + esc(user.name) + '</b> <small>· ' + esc(roleLabel(user.role) || '') + '</small>' +
         '</span>' +
       '</div>' +
     '</div>' +
@@ -87,7 +95,7 @@ function renderSidebar(user, activeId) {
   /* 按 group 分组 */
   var groups = {};
   NAV_ITEMS.forEach(function (it) {
-    if (it.roles && it.roles.indexOf(user.role) < 0) return;
+    if (it.mod && !canAccessModule(user, it.mod)) return;
     if (!groups[it.group]) groups[it.group] = [];
     groups[it.group].push(it);
   });

@@ -5,7 +5,7 @@
 async function initMePage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_me')) return;
   var content = renderPage({
     active: 'me',
     pageHtml: '<div class="loading">加载中...</div>'
@@ -13,7 +13,6 @@ async function initMePage() {
 
   function render() {
     user = getCurrentUser();
-    if (!user) return;
     var tasks = loadTasks();
     var myTasks = tasks.filter(function (t) { return t.assigneeId === user._id; });
     var myTodo = myTasks.filter(function (t) { return t.status === TASK_STATUS.TODO || t.status === TASK_STATUS.IN_PROGRESS; });
@@ -28,7 +27,7 @@ async function initMePage() {
         '<div class="profile-avatar">' + esc(user.name.charAt(0)) + '</div>' +
         '<div class="profile-info">' +
           '<div class="profile-name">' + esc(user.name) +
-            '<span class="role-tag role-' + esc(user.role) + '">' + esc(ROLE_ICON[user.role] + ' ' + ROLE_TEXT[user.role]) + '</span>' +
+            '<span class="role-tag role-' + esc(user.role) + '">' + esc(roleIcon(user.role) + ' ' + roleLabel(user.role)) + '</span>' +
           '</div>' +
           '<div class="profile-meta">' +
             '<span>📞 ' + esc(user.phone || '未填写') + '</span>' +

@@ -24,10 +24,10 @@
 
 var DAILY_PLAN_KEY = 'engms_daily_plans_v1';
 
-/* 仅班长 / 工人才能被选为实施人员或人员安排 */
-var DP_ALLOWED_ROLES = ['manager', 'worker'];
-/* 主管以上 (admin/manager) 才有审批权 */
-var DP_APPROVE_ROLES = ['admin', 'manager'];
+/* 可被安排为实施/值班人员的角色 (对应 roles 表 key, admin 不参与排班) */
+var DP_ALLOWED_ROLES = ['lead', 'foreman', 'worker'];
+/* 具备审批权的角色 (管理员 + 工程主管) */
+var DP_APPROVE_ROLES = ['admin', 'lead'];
 
 /* ---------- 数据持久化 (走 /api/daily-plans, 内存缓存由 common.js 管理) ---------- */
 function getDailyPlanByDate(date) {
@@ -104,7 +104,7 @@ function defaultDailyPlan(date) {
 async function initDailyPlanPage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_daily_plan')) return;
   var members = loadMembers().filter(function (m) { return m.active !== false; });
   /* 无 ?date 参数时, 不再回显"已提交/已通过"的记录, 直接给出下一次填报的空白表单 */
   var urlDate = queryParam('date') || '';
@@ -180,7 +180,6 @@ async function initDailyPlanPage() {
     var st = form.status;
     /* 只有填报人创建者本人在 draft/pending/rejected 状态能编辑 (approved 锁死) */
     if (st === 'approved') return false;
-    if (user.role === 'viewer') return false;
     /* pending 状态: 创建者可"撤回",审批人不能改字段,只可审批 — 简化: 全部走"驳回回 draft"流程 */
     if (st === 'pending') return false;
     return true;
@@ -278,7 +277,7 @@ async function initDailyPlanPage() {
     });
   }
   function approveForm() {
-    confirmDialog('审批通过', '确认审批通过"' + form.date + '"日计划?通过后所有班长/工人都可查看。', function () {
+    confirmDialog('审批通过', '确认审批通过"' + form.date + '"日计划?通过后所有填报人员都可查看。', function () {
       form.status = 'approved';
       form.approver = user.name;
       form.approved_at = new Date().toISOString();
@@ -342,12 +341,12 @@ async function initDailyPlanPage() {
       return {
         id: m._id,
         label: m.name,
-        sublabel: ROLE_DISPLAY[m.role] || ROLE_TEXT[m.role] || '',
+        sublabel: ROLE_DISPLAY[m.role] || roleLabel(m.role) || '',
         role: m.role
       };
     });
     if (items.length === 0) { toast('已是全部可分配人员', 'warn'); return; }
-    multiSelectDialog(title, '仅显示角色为「班长」「工人」的人员', items, [], function (ids) {
+    multiSelectDialog(title, '仅显示角色为「工程主管」「工程班长」「综合维修工」的人员', items, [], function (ids) {
       if (!ids) return;
       onPick(ids);
     });
@@ -420,8 +419,7 @@ async function initDailyPlanPage() {
     var st = form.status;
     var editable = canEdit();
 
-    /* 角色/状态显示 */
-    var ROLE_DISPLAY = window.ROLE_DISPLAY || { admin: '管理员', manager: '班长', worker: '工人', viewer: '观察者' };
+    /* 角色/状态显示 (ROLE_DISPLAY / ROLE_COLOR / ROLE_TAG_BG 由 common.js 提供) */
 
     /* 标题 banner 内容 */
     var planDateObj = parseDate(form.plan_date || form.date);
@@ -455,7 +453,7 @@ async function initDailyPlanPage() {
       } else {
         actions = '<button class="btn btn-default btn-lg" disabled>等待审批中…</button>';
       }
-    } else if (st === 'rejected' && user.role !== 'viewer') {
+    } else if (st === 'rejected') {
       actions =
         '<button class="btn btn-primary btn-lg" id="btnReopen">修改并重新提交</button>';
     } else if (st === 'approved') {
@@ -511,7 +509,7 @@ async function initDailyPlanPage() {
       /* 人员安排: 夜班 / 休息 / 调休 */
       '<div class="section rp-section dp-arrange-card">' +
         '<div class="dp-section-head">' +
-          '<h3>人员安排 <span class="sec-meta">仅显示角色为「班长」「工人」</span></h3>' +
+          '<h3>人员安排 <span class="sec-meta">仅显示角色为「工程主管」「工程班长」「综合维修工」</span></h3>' +
         '</div>' +
         '<div class="dp-crew-grid">' +
           renderCrewGroup('night', '夜间值班', st, editable, ROLE_DISPLAY) +
@@ -545,11 +543,11 @@ async function initDailyPlanPage() {
     var memberChips = (t.members || []).map(function (mid) {
       var m = members.find(function (mm) { return mm._id === mid; });
       if (!m) return '';
-      var roleLabel = ROLE_DISPLAY[m.role] || ROLE_TEXT[m.role] || '';
+      var roleLabelText = ROLE_DISPLAY[m.role] || roleLabel(m.role) || '';
       var roleBg = ROLE_TAG_BG[m.role] || 'rgba(126,132,168,.15)';
       var roleColor = ROLE_COLOR[m.role] || '#7E84A8';
       return '<span class="rp-task-member-chip">' +
-              '<span class="rp-role-tag" style="background:' + roleBg + ';color:' + roleColor + ';">' + esc(roleLabel) + '</span>' +
+              '<span class="rp-role-tag" style="background:' + roleBg + ';color:' + roleColor + ';">' + esc(roleLabelText) + '</span>' +
               '<span class="rp-task-member-name">' + esc(m.name) + '</span>' +
               (editable ? '<button class="rp-task-member-x" data-i="' + i + '" data-id="' + esc(mid) + '" type="button" title="移除">×</button>' : '') +
             '</span>';
@@ -570,7 +568,7 @@ async function initDailyPlanPage() {
         '</div>' +
 
         '<div class="rp-task-field rp-task-members">' +
-          '<label class="rp-task-label">计划实施人员 <span class="required">*</span> <span class="rp-task-hint">仅显示班长/工人</span></label>' +
+          '<label class="rp-task-label">计划实施人员 <span class="required">*</span> <span class="rp-task-hint">仅显示主管/班长/工人</span></label>' +
           '<div class="rp-task-members-row">' +
             memberChips +
             (editable ? '<button class="rp-task-add-member" data-i="' + i + '" type="button">' +
@@ -625,11 +623,11 @@ async function initDailyPlanPage() {
     var chips = listIds.map(function (mid) {
       var m = members.find(function (mm) { return mm._id === mid; });
       if (!m) return '';
-      var roleLabel = ROLE_DISPLAY[m.role] || ROLE_TEXT[m.role] || '';
+      var roleLabelText = ROLE_DISPLAY[m.role] || roleLabel(m.role) || '';
       var roleBg = ROLE_TAG_BG[m.role] || 'rgba(126,132,168,.15)';
       var roleColor = ROLE_COLOR[m.role] || '#7E84A8';
       return '<span class="rp-task-member-chip">' +
-              '<span class="rp-role-tag" style="background:' + roleBg + ';color:' + roleColor + ';">' + esc(roleLabel) + '</span>' +
+              '<span class="rp-role-tag" style="background:' + roleBg + ';color:' + roleColor + ';">' + esc(roleLabelText) + '</span>' +
               '<span class="rp-task-member-name">' + esc(m.name) + '</span>' +
               (editable ? '<button class="rp-crew-x" data-group="' + group + '" data-id="' + esc(mid) + '" type="button" title="移除">×</button>' : '') +
             '</span>';
@@ -849,10 +847,7 @@ async function initDailyPlanPage() {
   function rpIconDownload() { return '<svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="7 10 12 15 17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'; }
   function rpIconClipboard(){ return '<svg viewBox="0 0 24 24" fill="none" width="22" height="22"><rect x="8" y="3" width="8" height="4" rx="1" stroke="currentColor" stroke-width="2"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>'; }
 
-  /* 占位: common.js 未提供 ROLE_DISPLAY 时本地兜底 */
-  var ROLE_DISPLAY = window.ROLE_DISPLAY || { admin: '管理员', manager: '班长', worker: '工人', viewer: '观察者' };
-  var ROLE_COLOR   = window.ROLE_COLOR   || { admin: '#ED4245', manager: '#5865F2', worker: '#35ED7E', viewer: '#7E84A8' };
-  var ROLE_TAG_BG  = window.ROLE_TAG_BG  || { admin: 'rgba(237,66,69,.15)', manager: 'rgba(88,101,242,.15)', worker: 'rgba(53,237,126,.15)', viewer: 'rgba(126,132,168,.15)' };
+  /* 角色显示名 / 配色由 common.js 统一提供: ROLE_DISPLAY / ROLE_COLOR / ROLE_TAG_BG */
 
   loadForm();
 }

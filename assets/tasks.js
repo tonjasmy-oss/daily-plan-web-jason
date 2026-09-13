@@ -6,7 +6,7 @@
 async function initTasksPage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_tasks')) return;
   var projectFilter = queryParam('projectId') || '';
   var assigneeFilter = queryParam('assigneeId') || 'all';
 

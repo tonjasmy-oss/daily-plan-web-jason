@@ -15,32 +15,85 @@ var DB = {
   members: [], projects: [], tasks: [], reports: [],
   dailyPlans: [], weeklyPlans: [], weeklyReports: [],
   purchases: [], approvals: [], departments: [], roles: [],
-  purchaseGroups: [],
+  purchaseGroups: [], workTypes: [],
   settings: {},
   loaded: false, _loading: null
 };
 
-/* ===== 角色 (沿用旧名以免破坏现有 JS 调用) ===== */
+/* ===== 角色 =====
+ * 唯一事实来源是 roles 表 (/api/roles), 这里只提供代码内引用的常量 key,
+ * 以及 roles 表尚未加载时的兜底文案。4 个规范角色 key:
+ *   admin(管理员) / lead(工程主管) / foreman(工程班长) / worker(综合维修工)
+ * manager / viewer 是历史遗留 key, 仅用于兼容未迁移的老数据, 不要在新代码中使用。 */
 var ROLE = {
   ADMIN: 'admin',
-  MANAGER: 'manager',
-  WORKER: 'worker',
-  VIEWER: 'viewer'
+  LEAD: 'lead',
+  FOREMAN: 'foreman',
+  WORKER: 'worker'
 };
 
+/* 角色中文名兜底 (roles 表命中时优先用表里的 name) */
 var ROLE_TEXT = {
   admin: '管理员',
-  manager: '项目经理',
-  worker: '工人',
-  viewer: '观察者'
+  lead: '工程主管',
+  foreman: '工程班长',
+  worker: '综合维修工',
+  /* --- 历史遗留 key --- */
+  manager: '工程主管',
+  viewer: '综合维修工'
 };
 
+/* 角色图标 (纯装饰) */
 var ROLE_ICON = {
-  admin: 'admin',
-  manager: 'manager',
-  worker: 'worker',
-  viewer: 'viewer'
+  admin: '🛡️',
+  lead: '📋',
+  foreman: '🧰',
+  worker: '🔧',
+  /* --- 历史遗留 key --- */
+  manager: '📋',
+  viewer: '🔧'
 };
+
+/* 角色显示名 / 配色: 全局共享, 供日报表、日计划的人员标签使用
+ * (原先在 report.js / daily-plan.js 各自局部声明, 作用域错位导致抛异常) */
+var ROLE_DISPLAY = ROLE_TEXT;
+var ROLE_COLOR = {
+  admin: '#ED4245',
+  lead: '#5865F2',
+  foreman: '#FAA61A',
+  worker: '#35ED7E',
+  /* --- 历史遗留 key --- */
+  manager: '#5865F2',
+  viewer: '#7E84A8'
+};
+var ROLE_TAG_BG = {
+  admin: 'rgba(237,66,69,.15)',
+  lead: 'rgba(88,101,242,.15)',
+  foreman: 'rgba(250,166,26,.15)',
+  worker: 'rgba(53,237,126,.15)',
+  /* --- 历史遗留 key --- */
+  manager: 'rgba(88,101,242,.15)',
+  viewer: 'rgba(126,132,168,.15)'
+};
+
+/* 角色中文名: 优先查 roles 表 (W13 用户角色), 没匹配再回落到旧 ROLE_TEXT
+ * 替代散落各处的 ROLE_TEXT[m.role] 写法, 兼容老硬编码 */
+function roleLabel(key) {
+  if (!key) return '未分配';
+  try {
+    var roles = (typeof DB !== 'undefined' && DB.roles) ? DB.roles : (loadRoles ? loadRoles() : []);
+    var hit = (roles || []).filter(function (r) { return r.key === key; })[0];
+    if (hit) return hit.name;
+  } catch (_) { /* loadRoles 还没就绪 */ }
+  return ROLE_TEXT[key] || key;
+}
+/* 角色图标: 与 roleLabel 同样的回退逻辑 */
+function roleIcon(key) {
+  var roles = (typeof DB !== 'undefined' && DB.roles) ? DB.roles : (loadRoles ? loadRoles() : []);
+  var hit = (roles || []).filter(function (r) { return r.key === key; })[0];
+  if (hit && hit.icon) return hit.icon;
+  return ROLE_ICON[key] || key;
+}
 
 /* ===== 项目状态 ===== */
 var PROJECT_STATUS = {
@@ -130,20 +183,98 @@ var REPORT_STATUS_COLOR = {
   rejected: '#ED4245'
 };
 
-/* ===== 工种 ===== */
-var WORK_TYPE = {
-  GENERAL: '普工',
-  CARPENTER: '木工',
-  MASON: '瓦工',
-  ELECTRICIAN: '电工',
-  PLUMBER: '水工',
-  WELDER: '焊工',
-  PAINTER: '油漆工',
-  STEEL: '钢筋工',
-  CRANE: '起重工',
-  FOREMAN: '工长',
-  OTHER: '其他'
-};
+/* ===== 工种 =====
+ * 实际工种数据走服务端 work_types 表 (DB.workTypes).
+ * WORK_TYPE 仅作为离线下拉/老数据回退, 不再被默认业务逻辑引用.
+ * 新成员默认无工种 (空串), 由管理员在下拉中手动选择.
+ */
+var WORK_TYPE_FALLBACK = [
+  '电工', '综合维修工', '弱电维修工', '工程班长',
+  '秩序员', '客服管家', '资料员', '工程主管', '系统管理员'
+];
+function loadWorkTypes() {
+  return (DB.workTypes && DB.workTypes.length)
+    ? DB.workTypes.slice().sort(function (a, b) {
+        return (a.sort_order - b.sort_order) || (a.name < b.name ? -1 : 1);
+      })
+    : WORK_TYPE_FALLBACK.map(function (n, i) {
+        return { _id: 'fallback_' + i, name: n, sort_order: i };
+      });
+}
+function workTypeNames() {
+  return loadWorkTypes().map(function (w) { return w.name; });
+}
+async function createWorkType(data) {
+  var rec = Object.assign({
+    _id: 'wt_' + uuid(),
+    name: '', sort_order: 0,
+    created_at: new Date().toISOString()
+  }, data);
+  rec.name = (rec.name || '').trim();
+  if (!rec.name) throw new Error('工种名称不能为空');
+  // 重名不新增
+  var existed = DB.workTypes.find(function (w) { return w.name === rec.name; });
+  if (existed) return existed;
+  DB.workTypes.push(rec);
+  var resp = await fetch('/api/work-types', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: rec.name, sort_order: rec.sort_order })
+  });
+  if (!resp.ok) {
+    DB.workTypes = DB.workTypes.filter(function (w) { return w._id !== rec._id; });
+    var err = await resp.json().catch(function () { return {}; });
+    throw new Error(err.error || ('HTTP ' + resp.status));
+  }
+  var body = await resp.json();
+  if (body && body.record) {
+    rec._id = body.record._id; rec.created_at = body.record.created_at;
+  }
+  return rec;
+}
+async function updateWorkType(id, patch) {
+  var idx = _findIdx(DB.workTypes, id);
+  if (idx < 0) return null;
+  DB.workTypes[idx] = Object.assign({}, DB.workTypes[idx], patch, { updated_at: new Date().toISOString() });
+  var resp = await fetch('/api/work-types/' + id, {
+    method: 'PUT', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(DB.workTypes[idx])
+  });
+  if (!resp.ok) {
+    var err = await resp.json().catch(function () { return {}; });
+    throw new Error(err.error || ('HTTP ' + resp.status));
+  }
+  return DB.workTypes[idx];
+}
+async function deleteWorkType(id) {
+  var existed = DB.workTypes.find(function (w) { return w._id === id; });
+  if (!existed) return;
+  DB.workTypes = DB.workTypes.filter(function (w) { return w._id !== id; });
+  var resp = await fetch('/api/work-types/' + id, {
+    method: 'DELETE', credentials: 'same-origin'
+  });
+  if (!resp.ok) {
+    DB.workTypes.push(existed);
+    var err = await resp.json().catch(function () { return {}; });
+    throw new Error(err.error || ('HTTP ' + resp.status));
+  }
+}
+async function resetDefaultWorkTypes() {
+  var resp = await fetch('/api/work-types/reset', {
+    method: 'POST', credentials: 'same-origin'
+  });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  // 重新拉取
+  var r2 = await fetch('/api/work-types', { credentials: 'same-origin' });
+  if (r2.ok) {
+    var body = await r2.json();
+    DB.workTypes = body.items || [];
+  }
+}
+
+/* 旧常量 WORK_TYPE 保留为空对象, 防止其它旧模块引用时报错 */
+var WORK_TYPE = {};
 
 /* ============================================================
  * 数据库同步（fetch + 防抖 + 顺序保证）
@@ -219,6 +350,7 @@ function bootstrapDB() {
       DB.approvals = res.approvals || [];
       DB.departments = res.departments || [];
       DB.roles = res.roles || [];
+      DB.workTypes = res.work_types || [];
       DB.settings = res.settings || {};
       DB.loaded = true;
       DB._loading = null;
@@ -290,9 +422,9 @@ function createMember(data) {
   var rec = Object.assign({
     _id: uuid(),
     name: '',
-    role: ROLE.WORKER,
+    role: 'worker',
     phone: '',
-    workType: WORK_TYPE.GENERAL,
+    workType: '',
     avatar: '',
     active: true,
     joinDate: todayStr(),
@@ -451,6 +583,42 @@ function requireLogin() {
     }
     return u;
   }).catch(function () { return null; });
+}
+
+/* ============================================================
+ * 模块访问权限 (用户角色.modules)
+ *   - 每个 role 记录携带 modules: ['m_dashboard','m_daily_plan',...]
+ *   - NAV_ITEMS 每项带 mod 字段 ('m_xxx')
+ *   - 管理员 (isAdmin) 默认全部放行, 兼容老系统管理员不被锁
+ *   - 老角色无 modules 字段时, 默认全部放行 (向前兼容)
+ * ============================================================ */
+function userModules(user) {
+  if (!user) return [];
+  if (isAdmin.call(null, user)) return '__ALL__';  /* 标记全员 */
+  var roles = (typeof loadRoles === 'function') ? (loadRoles() || []) : [];
+  /* 优先按 role 字段在 members 里取 (角色已存到 member.role_key / member.role), 这里保留 key 双查 */
+  var roleKey = user.roleKey || user.role || '';
+  var r = roles.filter(function (x) { return x.key === roleKey || x._id === user.roleId; })[0];
+  if (!r) return [];  /* 没匹配到角色 = 没有模块 */
+  return Array.isArray(r.modules) ? r.modules : [];
+}
+function canAccessModule(user, mod) {
+  if (!mod) return true;
+  if (!user) return false;
+  if (user.role === 'admin') return true;  /* 管理员角色 key 硬编码放行 */
+  var ms = userModules(user);
+  if (ms === '__ALL__') return true;
+  return ms.indexOf(mod) >= 0;
+}
+/* 拦截函数: requireLogin 之后调用. 未授权 -> toast + 跳 dashboard */
+function requireModule(mod) {
+  var u = getCurrentUser();
+  if (u && !canAccessModule(u, mod)) {
+    toast('该页面您没有访问权限', 'warn');
+    setTimeout(function () { location.href = 'dashboard.html'; }, 600);
+    return false;
+  }
+  return true;
 }
 
 /* ============================================================
@@ -643,7 +811,7 @@ function createRole(data) {
   var rec = Object.assign({
     _id: 'r_' + uuid(),
     key: '', name: '', description: '',
-    permissions: [], sort_order: 0,
+    permissions: [], modules: [], sort_order: 0,
     created_at: new Date().toISOString()
   }, data);
   DB.roles.push(rec);
@@ -750,11 +918,12 @@ function migrateLocalStorageToServer() {
 
 function isAdmin() {
   var u = getCurrentUser();
-  return u && u.role === ROLE.ADMIN;
+  return !!(u && u.role === 'admin');
 }
 function canManage() {
+  /* 管理员 + 主管 (对应 roles 表的 key: admin/lead) */
   var u = getCurrentUser();
-  return u && (u.role === ROLE.ADMIN || u.role === ROLE.MANAGER);
+  return !!(u && (u.role === 'admin' || u.role === 'lead'));
 }
 
 /* ===== ID 生成 ===== */
@@ -867,7 +1036,9 @@ function reportDisplayTitle(rec) {
  * 追加条目存放位置随记录类型不同 (见 planAppendField):
  *   日计划 / 周计划 -> tasks[]   计划周报 -> items[] (周报没有任务列表)
  * ============================================================ */
-var PLAN_APPROVE_ROLES = ['admin', 'manager'];
+/* 审批人角色集合 (对应 roles.key): 管理员 + 工程主管
+ * 角色定义见 roles 表 (W13 用户角色); 与代码约定的 key 保持一致 */
+var PLAN_APPROVE_ROLES = ['admin', 'lead'];
 /* submitted 是计划周报改版前的旧状态值, 保留映射只为让老数据仍能正常显示 */
 var PLAN_STATUS_TEXT = { draft: '草稿', pending: '待审批', approved: '已通过', rejected: '已驳回', submitted: '已提交' };
 

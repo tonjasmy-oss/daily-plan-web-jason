@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS members (
   name TEXT DEFAULT '',
   role TEXT DEFAULT 'worker',
   phone TEXT DEFAULT '',
-  work_type TEXT DEFAULT '普工',
+  work_type TEXT DEFAULT '',
   avatar TEXT DEFAULT '',
   active INTEGER DEFAULT 1,
   join_date TEXT DEFAULT '',
@@ -158,6 +158,9 @@ CREATE TABLE IF NOT EXISTS weekly_plans (
   submitted_at TEXT DEFAULT '',
   approver TEXT DEFAULT '',
   approved_at TEXT DEFAULT '',
+  rejected_at TEXT DEFAULT '',
+  rejected_reason TEXT DEFAULT '',
+  reviewed_by TEXT DEFAULT '',
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
@@ -239,6 +242,7 @@ CREATE TABLE IF NOT EXISTS roles (
   name TEXT DEFAULT '',
   description TEXT DEFAULT '',
   permissions_json TEXT DEFAULT '[]',
+  modules_json TEXT DEFAULT '[]',
   sort_order INTEGER DEFAULT 0,
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
@@ -246,6 +250,13 @@ CREATE TABLE IF NOT EXISTS roles (
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value_json TEXT DEFAULT '{}',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS work_types (
+  id TEXT PRIMARY KEY,
+  name TEXT DEFAULT '',
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
 """
@@ -364,6 +375,9 @@ def row_to_weekly_plan(r):
         'members': json.loads(r['members_json'] or '[]'),
         'submitter': r['submitter'], 'submitted_at': r['submitted_at'],
         'approver': r['approver'], 'approved_at': r['approved_at'],
+        'rejected_at': _col(r, 'rejected_at', ''),
+        'rejected_reason': _col(r, 'rejected_reason', ''),
+        'reviewed_by': _col(r, 'reviewed_by', ''),
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
     }
 
@@ -431,6 +445,7 @@ def row_to_role(r):
         '_id': r['id'], 'key': r['key'], 'name': r['name'],
         'description': r['description'],
         'permissions': json.loads(r['permissions_json'] or '[]'),
+        'modules': json.loads(_col(r, 'modules_json', '') or '[]'),
         'sort_order': r['sort_order'],
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
     }
@@ -444,11 +459,121 @@ def row_to_setting(r):
     }
 
 
+def row_to_work_type(r):
+    return {
+        '_id': r['id'], 'name': r['name'],
+        'sort_order': r['sort_order'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def list_work_types(conn):
+    return [row_to_work_type(r) for r in conn.execute(
+        'SELECT * FROM work_types ORDER BY sort_order, name').fetchall()]
+
+
+def upsert_work_type(conn, data):
+    wid = data.get('_id') or gen_id('wt')
+    now = now_iso()
+    name = (data.get('name') or '').strip()
+    if not name:
+        raise ValueError('工种名称不能为空')
+    sort_order = int(data.get('sort_order', 0) or 0)
+    old = conn.execute('SELECT id FROM work_types WHERE id=?', (wid,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE work_types SET name=?, sort_order=?, updated_at=? WHERE id=?',
+            (name, sort_order, now, wid))
+    else:
+        # 重名检查: 同名工种视为同一条, 避免下拉出现重复项
+        dup = conn.execute('SELECT id FROM work_types WHERE name=?', (name,)).fetchone()
+        if dup:
+            conn.execute(
+                'UPDATE work_types SET sort_order=?, updated_at=? WHERE id=?',
+                (sort_order, now, dup['id']))
+            conn.commit()
+            return dup['id']
+        conn.execute(
+            'INSERT INTO work_types (id, name, sort_order, created_at, updated_at) '
+            'VALUES (?,?,?,?,?)',
+            (wid, name, sort_order, data.get('created_at') or now, now))
+    conn.commit()
+    return wid
+
+
+def reset_default_work_types(conn):
+    """重置为荣总指定的 9 项默认工种 (清空后按 sort_order 重建)"""
+    defaults = [
+        '电工', '综合维修工', '弱电维修工', '工程班长',
+        '秩序员', '客服管家', '资料员', '工程主管', '系统管理员',
+    ]
+    with _lock:
+        conn.execute('DELETE FROM work_types')
+        now = now_iso()
+        for i, name in enumerate(defaults):
+            conn.execute(
+                'INSERT INTO work_types (id, name, sort_order, created_at, updated_at) '
+                'VALUES (?,?,?,?,?)',
+                (gen_id('wt'), name, i, now, now))
+        conn.commit()
+
+
 def init_db():
     conn = get_db()
     conn.executescript(SCHEMA)
     conn.commit()
     conn.close()
+
+
+# ---------- 角色 (唯一事实来源: roles 表) ----------
+# 4 个规范角色 key, 与前端 assets/common.js 的 ROLE 保持一致
+ROLE_KEYS = ('admin', 'lead', 'foreman', 'worker')
+# 历史遗留 key -> 规范 key (老库 members.role 里存过 manager / viewer)
+LEGACY_ROLE_MAP = {'manager': 'lead', 'viewer': 'worker'}
+# 内置角色的默认可访问模块 id, 与前端 layout.js 的 NAV_ITEMS[].mod 一一对应。
+# 只用于给 modules 列为空的老角色做一次性补齐, 之后完全由「用户角色」页接管。
+DEFAULT_ROLE_MODULES = {
+    'admin': [
+        'm_dashboard', 'm_daily_plan', 'm_weekly_plan', 'm_report', 'm_weekly_rpt',
+        'm_browse', 'm_purchase', 'm_reports', 'm_approval', 'm_purchase_mgmt',
+        'm_tasks', 'm_projects', 'm_members', 'm_departments', 'm_roles',
+        'm_settings', 'm_files', 'm_about', 'm_me',
+    ],
+    'lead': [
+        'm_dashboard', 'm_daily_plan', 'm_weekly_plan', 'm_report', 'm_weekly_rpt',
+        'm_browse', 'm_purchase', 'm_reports', 'm_approval', 'm_purchase_mgmt',
+        'm_tasks', 'm_projects', 'm_members', 'm_departments', 'm_about', 'm_me',
+    ],
+    'foreman': [
+        'm_dashboard', 'm_daily_plan', 'm_report', 'm_reports', 'm_browse',
+        'm_tasks', 'm_projects', 'm_about', 'm_me',
+    ],
+    'worker': [
+        'm_dashboard', 'm_daily_plan', 'm_report', 'm_reports', 'm_about', 'm_me',
+    ],
+}
+
+
+def normalize_role(conn, role):
+    """把成员角色 key 规范化到 roles 表, 防止前端存下认不出的脏 key。
+
+    - 空值            -> 'worker'
+    - 历史 key        -> 按 LEGACY_ROLE_MAP 映射 (manager->lead, viewer->worker)
+    - key 不在 roles 表 -> 回落 'worker' (roles 表为空时不校验, 避免误伤)
+    """
+    role = (role or '').strip()
+    role = LEGACY_ROLE_MAP.get(role, role)
+    if not role:
+        return 'worker'
+    if role not in ROLE_KEYS:
+        try:
+            known = {row['key'] for row in conn.execute('SELECT key FROM roles').fetchall()}
+        except Exception:
+            known = set()
+        if known and role not in known:
+            print('[warn] 成员角色 %r 不在 roles 表中, 已回落为 worker' % role)
+            return 'worker'
+    return role
 
 
 def migrate_db():
@@ -466,6 +591,9 @@ def migrate_db():
                 ('project_id', "TEXT DEFAULT ''"),
                 ('tasks_json', "TEXT DEFAULT '[]'"),
                 ('created_by', "TEXT DEFAULT ''"),
+                ('rejected_at', "TEXT DEFAULT ''"),
+                ('rejected_reason', "TEXT DEFAULT ''"),
+                ('reviewed_by', "TEXT DEFAULT ''"),
             ],
             'weekly_reports': [
                 ('rejected_at', "TEXT DEFAULT ''"),
@@ -481,6 +609,9 @@ def migrate_db():
                 ('reviewed_by', "TEXT DEFAULT ''"),
                 ('merge_id', "TEXT DEFAULT ''"),
             ],
+            'roles': [
+                ('modules_json', "TEXT DEFAULT '[]'"),
+            ],
         }
         for table, cols in new_cols.items():
             have = {row['name'] for row in conn.execute('PRAGMA table_info(%s)' % table).fetchall()}
@@ -491,8 +622,51 @@ def migrate_db():
                     conn.execute('ALTER TABLE %s ADD COLUMN %s %s' % (table, name, ddl))
                     print('[migrate] %s += %s' % (table, name))
         conn.commit()
+
+        _migrate_roles(conn)
+        conn.commit()
     finally:
         conn.close()
+
+
+def _migrate_roles(conn):
+    """一次性数据迁移 (由 settings.roles_modules_seeded 标记把关):
+
+    1. members.role 历史 key 规范化: manager -> lead, viewer -> worker
+       老版本的「项目经理 / 观察者」与 roles 表的
+       「工程主管 / 综合维修工」是两套互相脱节的定义, 人员管理下拉框
+       改成读 roles 表之后, 老 key 会让角色显示为空白。
+    2. 内置角色的 modules_json 为空时, 按 DEFAULT_ROLE_MODULES 补齐,
+       否则 roles 表新增 modules 列之前建的角色会「一个模块都看不到」,
+       连导航栏都不显示。
+    """
+    moved = 0
+    for old_key, new_key in LEGACY_ROLE_MAP.items():
+        cur = conn.execute('UPDATE members SET role=? WHERE role=?', (new_key, old_key))
+        moved += cur.rowcount or 0
+    if moved:
+        print('[migrate] members.role 规范化 %d 行 (manager->lead, viewer->worker)' % moved)
+
+    done = conn.execute(
+        "SELECT value_json FROM settings WHERE key='roles_modules_seeded'").fetchone()
+    if done:
+        return
+
+    role_keys = {row['key'] for row in conn.execute('SELECT key FROM roles').fetchall()}
+    for key, mods in DEFAULT_ROLE_MODULES.items():
+        if key not in role_keys:
+            continue
+        row = conn.execute(
+            'SELECT id, modules_json FROM roles WHERE key=?', (key,)).fetchone()
+        if row and not (row['modules_json'] or '').replace('[', '').replace(']', '').strip():
+            conn.execute('UPDATE roles SET modules_json=?, updated_at=? WHERE id=?',
+                         (json.dumps(mods), now_iso(), row['id']))
+            print('[migrate] roles(%s) 补齐可访问模块 %d 项' % (key, len(mods)))
+
+    conn.execute(
+        'INSERT OR REPLACE INTO settings (key, value_json, updated_at) VALUES (?,?,?)',
+        ('roles_modules_seeded', json.dumps('1'), now_iso()))
+
 
 
 # ---------- 种子数据（与原前端 seedIfEmpty 一致） ----------
@@ -511,10 +685,10 @@ def seed_if_empty():
                 'INSERT INTO members (id,name,role,phone,work_type,active,join_date,created_at) VALUES (?,?,?,?,?,1,?,?)',
                 (mid, name, role, phone, work_type, today_str(), now))
             return mid
-        admin = add_member('管理员', 'admin', '13800000000', '工长')
-        m1 = add_member('张工', 'manager', '13811111111', '工长')
-        m2 = add_member('李师傅', 'worker', '13822222222', '木工')
-        m3 = add_member('王师傅', 'worker', '13833333333', '电工')
+        admin = add_member('管理员', 'admin', '13800000000', '')
+        m1 = add_member('张工', 'lead', '13811111111', '')
+        m2 = add_member('李师傅', 'worker', '13822222222', '')
+        m3 = add_member('王师傅', 'worker', '13833333333', '')
 
         end = (datetime.now() + timedelta(days=180)).strftime('%Y-%m-%d')
         pid = gen_id('p')
@@ -634,19 +808,20 @@ def list_settings(conn):
 
 def upsert_member(conn, data):
     mid = data.get('_id') or gen_id('m')
+    role = normalize_role(conn, data.get('role'))
     old = conn.execute('SELECT id FROM members WHERE id=?', (mid,)).fetchone()
     if old:
         conn.execute(
             'UPDATE members SET name=?,role=?,phone=?,work_type=?,avatar=?,active=?,join_date=?,created_at=? WHERE id=?',
-            (data.get('name', ''), data.get('role', 'worker'), data.get('phone', ''),
-             data.get('workType', '普工'), data.get('avatar', ''),
+            (data.get('name', ''), role, data.get('phone', ''),
+             data.get('workType', ''), data.get('avatar', ''),
              1 if data.get('active', True) else 0, data.get('joinDate', ''),
              data.get('created_at') or now_iso(), mid))
     else:
         conn.execute(
             'INSERT INTO members (id,name,role,phone,work_type,avatar,active,join_date,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-            (mid, data.get('name', ''), data.get('role', 'worker'), data.get('phone', ''),
-             data.get('workType', '普工'), data.get('avatar', ''),
+            (mid, data.get('name', ''), role, data.get('phone', ''),
+             data.get('workType', ''), data.get('avatar', ''),
              1 if data.get('active', True) else 0, data.get('joinDate', ''),
              data.get('created_at') or now_iso()))
     conn.commit()
@@ -834,14 +1009,17 @@ def upsert_weekly_plan(conn, data):
               data.get('content', ''),
               json.dumps(data.get('members', []), ensure_ascii=False),
               data.get('submitter', ''), data.get('submitted_at', ''),
-              data.get('approver', ''), data.get('approved_at', ''))
+              data.get('approver', ''), data.get('approved_at', ''),
+              data.get('rejected_at', '') or (_col(old, 'rejected_at', '') if old else ''),
+              data.get('rejected_reason', '') or (_col(old, 'rejected_reason', '') if old else ''),
+              data.get('reviewed_by', '') or (_col(old, 'reviewed_by', '') if old else ''))
     if old:
         conn.execute(
-            'UPDATE weekly_plans SET week_start=?,week_end=?,start_date=?,end_date=?,project_id=?,tasks_json=?,created_by=?,title=?,status=?,content=?,members_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,updated_at=? WHERE id=?',
+            'UPDATE weekly_plans SET week_start=?,week_end=?,start_date=?,end_date=?,project_id=?,tasks_json=?,created_by=?,title=?,status=?,content=?,members_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,updated_at=? WHERE id=?',
             fields + (now, wid))
     else:
         conn.execute(
-            'INSERT INTO weekly_plans (id,week_start,week_end,start_date,end_date,project_id,tasks_json,created_by,title,status,content,members_json,submitter,submitted_at,approver,approved_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO weekly_plans (id,week_start,week_end,start_date,end_date,project_id,tasks_json,created_by,title,status,content,members_json,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (wid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return wid
@@ -984,15 +1162,16 @@ def upsert_role(conn, data):
     fields = (data.get('key', ''), data.get('name', ''),
               data.get('description', ''),
               json.dumps(data.get('permissions', []), ensure_ascii=False),
+              json.dumps(data.get('modules', []) or [], ensure_ascii=False),
               int(data.get('sort_order', 0) or 0))
     old = conn.execute('SELECT id FROM roles WHERE id=?', (rid,)).fetchone()
     if old:
         conn.execute(
-            'UPDATE roles SET key=?,name=?,description=?,permissions_json=?,sort_order=?,updated_at=? WHERE id=?',
+            'UPDATE roles SET key=?,name=?,description=?,permissions_json=?,modules_json=?,sort_order=?,updated_at=? WHERE id=?',
             fields + (now, rid))
     else:
         conn.execute(
-            'INSERT INTO roles (id,key,name,description,permissions_json,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+            'INSERT INTO roles (id,key,name,description,permissions_json,modules_json,sort_order,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
             (rid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return rid
@@ -1744,6 +1923,58 @@ class Handler(BaseHTTPRequestHandler):
                     conn.close()
                     return self._json({'ok': True})
 
+        # ---- work_types 特例: 全手动路由(避开通用 CRUD 的 status/分页/upsert 500) ----
+        if path == '/api/work-types':
+            if method == 'GET':
+                items = list_work_types(conn)
+                conn.close()
+                return self._json({'items': items, 'total': len(items)})
+            if method == 'POST':
+                try:
+                    rid = upsert_work_type(conn, body or {})
+                    r = conn.execute('SELECT * FROM work_types WHERE id=?', (rid,)).fetchone()
+                except ValueError as e:
+                    conn.close(); return self._error(str(e), 400)
+                conn.close()
+                return self._json({'record': row_to_work_type(r)})
+        if path == '/api/work-types/reset' and method == 'POST':
+            reset_default_work_types(conn)
+            items = list_work_types(conn)
+            conn.close()
+            return self._json({'ok': True, 'items': items})
+        m_wt = re.match(r'^/api/work-types/([\w-]+)$', path)
+        if m_wt:
+            wid = m_wt.group(1)
+            if wid == 'reset':
+                conn.close(); return self._error('reset 需用 POST /api/work-types/reset', 405)
+            if method == 'PUT':
+                try:
+                    r0 = conn.execute('SELECT * FROM work_types WHERE id=?', (wid,)).fetchone()
+                    if not r0:
+                        conn.close(); return self._error('记录不存在', 404)
+                    data = dict(row_to_work_type(r0))
+                    data.update(body or {})
+                    data['_id'] = wid
+                    upsert_work_type(conn, data)
+                    r = conn.execute('SELECT * FROM work_types WHERE id=?', (wid,)).fetchone()
+                except ValueError as e:
+                    conn.close(); return self._error(str(e), 400)
+                conn.close()
+                return self._json({'record': row_to_work_type(r)})
+            if method == 'DELETE':
+                row = conn.execute('SELECT name FROM work_types WHERE id=?', (wid,)).fetchone()
+                if not row:
+                    conn.close(); return self._error('记录不存在', 404)
+                in_use = conn.execute(
+                    'SELECT COUNT(*) c FROM members WHERE work_type=?', (row['name'],)
+                ).fetchone()['c']
+                if in_use > 0:
+                    conn.close(); return self._error('该工种已被 %d 位成员使用, 无法删除' % in_use, 400)
+                conn.execute('DELETE FROM work_types WHERE id=?', (wid,))
+                conn.commit()
+                conn.close()
+                return self._json({'ok': True})
+
         # ---- settings (KV) ----
         if path == '/api/settings' and method == 'GET':
             data = list_settings(conn)
@@ -1820,6 +2051,7 @@ class Handler(BaseHTTPRequestHandler):
                     'approvals': list_approvals(conn),
                     'departments': list_departments(conn),
                     'roles': list_roles(conn),
+                    'work_types': list_work_types(conn),
                     'settings': list_settings(conn),
                     'exported_at': now_iso(),
                     'version': 'eng_ms_v3_db',
@@ -1831,7 +2063,7 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 for t in ('members', 'projects', 'tasks', 'reports',
                           'daily_plans', 'weekly_plans', 'weekly_reports',
-                          'purchases', 'approvals', 'departments', 'roles', 'settings'):
+                          'purchases', 'approvals', 'departments', 'roles', 'settings', 'work_types'):
                     conn.execute('DELETE FROM ' + t)
                 for rec in body.get('members', []):
                     upsert_member(conn, rec)
@@ -1855,6 +2087,11 @@ class Handler(BaseHTTPRequestHandler):
                     upsert_department(conn, rec)
                 for rec in body.get('roles', []):
                     upsert_role(conn, rec)
+                for rec in body.get('work_types', []):
+                    try:
+                        upsert_work_type(conn, rec)
+                    except ValueError:
+                        pass  # 重名/空名 跳过, 保证恢复不中断
                 for k, v in (body.get('settings') or {}).items():
                     upsert_setting(conn, k, v)
             conn.close()
@@ -1864,7 +2101,7 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 for t in ('members', 'projects', 'tasks', 'reports',
                           'daily_plans', 'weekly_plans', 'weekly_reports',
-                          'purchases', 'approvals', 'departments', 'roles', 'settings'):
+                          'purchases', 'approvals', 'departments', 'roles', 'settings', 'work_types'):
                     conn.execute('DELETE FROM ' + t)
             conn.commit()
             conn.close()
@@ -1872,6 +2109,16 @@ class Handler(BaseHTTPRequestHandler):
 
         conn.close()
         self._error('接口不存在: %s %s' % (method, path), 404)
+
+
+def ensure_default_work_types():
+    """work_types 表为空时注入荣总指定的 9 项默认工种.
+    独立于 seed_if_empty, 兼容老库(已有成员但无工种行)的场景."""
+    conn = get_db()
+    n = conn.execute('SELECT COUNT(*) c FROM work_types').fetchone()['c']
+    if n == 0:
+        reset_default_work_types(conn)
+    conn.close()
 
 
 def main():
@@ -1884,6 +2131,7 @@ def main():
     init_db()
     migrate_db()
     seed_if_empty()
+    ensure_default_work_types()
     load_sessions()
     server = ThreadingHTTPServer(('0.0.0.0', port), Handler)
     print('=' * 52)

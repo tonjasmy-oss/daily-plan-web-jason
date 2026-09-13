@@ -5,10 +5,15 @@
  * 状态机: draft → submitted → signed / rejected
  * ============================================================ */
 
+/* 可作为「实施人员」被选择的角色 (对应 roles 表 key, admin 不参与施工排班)
+ * 注意: 必须声明在模块作用域 —— 原先写在 openImageViewer() 内部, 导致
+ *       renderTaskRow() / openMemberPickerForTask() 访问不到而抛异常 */
+var TASK_ALLOWED_ROLES = ['lead', 'foreman', 'worker'];
+
 async function initReportPage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_report')) return;
   var recordId = queryParam('id');
   var isEdit = !!recordId;
   var members = loadMembers().filter(function (m) { return m.active !== false; });
@@ -442,11 +447,11 @@ async function initReportPage() {
     var memberChips = (t.members || []).map(function (mid) {
       var m = members.find(function (mm) { return mm._id === mid; });
       if (!m) return '';
-      var roleLabel = ROLE_DISPLAY[m.role] || (ROLE_TEXT[m.role] || '');
+      var roleLabelText = ROLE_DISPLAY[m.role] || roleLabel(m.role) || '';
       var roleBg = ROLE_TAG_BG[m.role] || 'rgba(126,132,168,.15)';
       var roleColor = ROLE_COLOR[m.role] || '#7E84A8';
       return '<span class="rp-task-member-chip">' +
-              '<span class="rp-role-tag" style="background:' + roleBg + ';color:' + roleColor + ';">' + esc(roleLabel) + '</span>' +
+              '<span class="rp-role-tag" style="background:' + roleBg + ';color:' + roleColor + ';">' + esc(roleLabelText) + '</span>' +
               '<span class="rp-task-member-name">' + esc(m.name) + '</span>' +
               (editable ? '<button class="rp-task-member-x" data-i="' + i + '" data-id="' + esc(mid) + '" type="button">×</button>' : '') +
             '</span>';
@@ -908,33 +913,29 @@ async function initReportPage() {
     });
   }
 
-  /* ===== 实施人员多选(仅显示"班长"/"工人",以勾选方式添加) ===== */
-  var ROLE_DISPLAY = { admin: '管理员', manager: '班长', worker: '工人', viewer: '观察者' };
-  var ROLE_COLOR  = { admin: '#ED4245', manager: '#5865F2', worker: '#35ED7E', viewer: '#7E84A8' };
-  var ROLE_TAG_BG = { admin: 'rgba(237,66,69,.15)', manager: 'rgba(88,101,242,.15)', worker: 'rgba(53,237,126,.15)', viewer: 'rgba(126,132,168,.15)' };
-  /* 实施人员只显示: 班长 (manager) + 工人 (worker) */
-  var TASK_ALLOWED_ROLES = ['manager', 'worker'];
-
+  /* ===== 实施人员多选(仅显示"主管/班长/工人",以勾选方式添加) =====
+   * ROLE_DISPLAY / ROLE_COLOR / ROLE_TAG_BG / TASK_ALLOWED_ROLES 均取自
+   * common.js 或本文件顶部, 此处不再重复声明 */
   function openMemberPickerForTask(taskIndex) {
     var t = form.tasks[taskIndex];
     var available = members.filter(function (m) {
       return TASK_ALLOWED_ROLES.indexOf(m.role) >= 0 && t.members.indexOf(m._id) < 0;
     });
     if (available.length === 0) {
-      toast('已是全部可分配人员（班长/工人）', 'warn');
+      toast('已是全部可分配人员（主管/班长/工人）', 'warn');
       return;
     }
     var items = available.map(function (m) {
       return {
         id: m._id,
         label: m.name,
-        sublabel: ROLE_DISPLAY[m.role] || (ROLE_TEXT[m.role] || ''),
+        sublabel: ROLE_DISPLAY[m.role] || roleLabel(m.role) || '',
         role: m.role
       };
     });
     multiSelectDialog(
       '添加实施人员',
-      '仅显示角色为「班长」或「工人」的人员，勾选后点击确定',
+      '仅显示角色为「工程主管」「工程班长」「综合维修工」的人员，勾选后点击确定',
       items,
       [],
       function (ids) {

@@ -29,7 +29,7 @@ var WR_STATUS_CLASS = {
 async function initWeeklyReportPage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_weekly_rpt')) return;
   var state = { start: '', end: '' };
 
   /* 下一个周报周期: 接着已有周报的末尾往后排, 没有历史则用本周 */

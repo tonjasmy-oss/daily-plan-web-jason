@@ -8,7 +8,8 @@
 async function initApprovalPage() {
   var user = await requireLogin();
   if (!user) return;
-  if (!isAdmin() && !canManage()) { toast('需要管理员或项目经理权限', 'warn'); setTimeout(function(){ location.href='dashboard.html'; }, 800); return; }
+  if (!requireModule('m_approval')) return;
+  if (!isAdmin() && !canManage()) { toast('需要管理员或工程主管权限', 'warn'); setTimeout(function(){ location.href='dashboard.html'; }, 800); return; }
 
   var tab = queryParam('tab') || 'user';
   var status = queryParam('status') || 'pending';

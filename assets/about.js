@@ -4,6 +4,7 @@
 async function initAboutPage() {
   var user = await requireLogin();
   if (!user) return;
+  if (!requireModule('m_about')) return;
   var s = loadSettings();
 
   var content = renderPage({

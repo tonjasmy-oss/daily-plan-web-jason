@@ -6,6 +6,7 @@
 async function initDepartmentsPage() {
   var user = await requireLogin();
   if (!user) return;
+  if (!requireModule('m_departments')) return;
   if (!isAdmin()) { toast('需要管理员权限', 'warn'); setTimeout(function(){ location.href='dashboard.html'; }, 800); return; }
 
   /* 默认种子 - 仅在服务端无数据时插入 */

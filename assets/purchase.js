@@ -10,6 +10,7 @@
 async function initPurchasePage() {
   var user = await requireLogin();
   if (!user) return;
+  if (!requireModule('m_purchase')) return;
   var projects = loadProjects();
 
   /* 单位下拉备选; 用户也可以手动键入 */

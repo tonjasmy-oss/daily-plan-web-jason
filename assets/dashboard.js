@@ -5,7 +5,7 @@
 async function initDashboardPage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_dashboard')) return;
   var content = renderPage({
     active: 'dashboard',
     pageHtml: '<div class="dashboard-loading">加载中...</div>'
@@ -65,7 +65,7 @@ async function initDashboardPage() {
       /* 欢迎 + 关键指标 */
       '<div class="hero">' +
         '<h2>' + greeting() + '，' + esc(user.name) + '！</h2>' +
-        '<div class="hero-sub">' + formatDateStr(new Date()) + ' · ' + esc(ROLE_TEXT[user.role]) + ' · 今日有 ' + myTodoCount + ' 项待办</div>' +
+        '<div class="hero-sub">' + formatDateStr(new Date()) + ' · ' + esc(roleLabel(user.role)) + ' · 今日有 ' + myTodoCount + ' 项待办</div>' +
       '</div>' +
       '<div class="kpi-row">' +
         '<div class="kpi-card kpi-blue"><div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg></div><div class="kpi-num">' + activeProjects + '/' + totalProjects + '</div><div class="kpi-label">进行中项目</div></div>' +

@@ -44,6 +44,7 @@ function fmSkeleton() {
 async function initFilesPage() {
   var user = await requireLogin();
   if (!user) return;
+  if (!requireModule('m_files')) return;
   if (!isAdmin()) {
     toast('需要管理员权限', 'warn');
     setTimeout(function () { location.href = 'dashboard.html'; }, 800);

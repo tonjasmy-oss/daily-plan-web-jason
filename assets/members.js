@@ -5,7 +5,11 @@
 async function initMembersPage() {
   var user = await requireLogin();
   if (!user) return;
-  if (user.role !== ROLE.ADMIN && user.role !== ROLE.MANAGER) {
+  /* 工具: 角色中文名 —— 优先 roles 表, 回落到 common.js 的 ROLE_TEXT */
+  function _roleLabel(key) { return roleLabel(key) || key || '未分配'; }
+  if (!requireModule('m_members')) return;
+  /* 管理员/主管才能进人员管理 */
+  if (user.role !== 'admin' && user.role !== 'lead') {
     toast('无权访问人员管理', 'error');
     setTimeout(function () { location.href = 'dashboard.html'; }, 800);
     return;
@@ -26,21 +30,23 @@ async function initMembersPage() {
 
   var state = { keyword: '', roleFilter: 'all' };
 
+  /* 统计卡片: 顶部"总人数/在职"固定 + 每个角色动态生成一张 */
   function refreshStats() {
     var all = loadMembers();
     var active = all.filter(function (m) { return m.active !== false; });
+    var roles = (typeof loadRoles === 'function') ? (loadRoles() || []) : [];
     var byRole = {};
-    ROLE_TEXT && Object.keys(ROLE_TEXT).forEach(function (r) { byRole[r] = 0; });
-    all.forEach(function (m) {
-      byRole[m.role] = (byRole[m.role] || 0) + 1;
-    });
+    roles.forEach(function (r) { byRole[r.key] = 0; });
+    all.forEach(function (m) { byRole[m.role] = (byRole[m.role] || 0) + 1; });
     var stats = document.getElementById('memberStats');
-    stats.innerHTML =
+    var html =
       '<div class="stat-card"><div class="stat-value">' + all.length + '</div><div class="stat-label">总人数</div></div>' +
-      '<div class="stat-card"><div class="stat-value">' + active.length + '</div><div class="stat-label">在职</div></div>' +
-      '<div class="stat-card"><div class="stat-value">' + (byRole[ROLE.ADMIN] || 0) + '</div><div class="stat-label">' + ROLE_ICON[ROLE.ADMIN] + ' 管理员</div></div>' +
-      '<div class="stat-card"><div class="stat-value">' + (byRole[ROLE.MANAGER] || 0) + '</div><div class="stat-label">' + ROLE_ICON[ROLE.MANAGER] + ' 项目经理</div></div>' +
-      '<div class="stat-card"><div class="stat-value">' + (byRole[ROLE.WORKER] || 0) + '</div><div class="stat-label">' + ROLE_ICON[ROLE.WORKER] + ' 工人</div></div>';
+      '<div class="stat-card"><div class="stat-value">' + active.length + '</div><div class="stat-label">在职</div></div>';
+    roles.forEach(function (r) {
+      html += '<div class="stat-card"><div class="stat-value">' + (byRole[r.key] || 0) +
+        '</div><div class="stat-label">' + esc(r.name) + '</div></div>';
+    });
+    stats.innerHTML = html;
   }
 
   function renderList() {
@@ -69,7 +75,7 @@ async function initMembersPage() {
         '<div class="member-row1">' + avatar +
           '<div class="member-meta">' +
             '<div class="member-name">' + esc(m.name) +
-              '<span class="role-tag role-' + esc(m.role) + '">' + esc(ROLE_ICON[m.role] + ' ' + ROLE_TEXT[m.role]) + '</span>' +
+              '<span class="role-tag role-' + esc(m.role) + '">' + esc(_roleLabel(m.role)) + '</span>' +
               (m.active === false ? '<span class="badge-disabled">已停用</span>' : '') +
             '</div>' +
             '<div class="member-sub">' + esc(m.workType || '未指定工种') + (m.phone ? ' · 📞 ' + esc(m.phone) : '') + '</div>' +
@@ -116,7 +122,13 @@ async function initMembersPage() {
 
   function showMemberDialog(m) {
     var isEdit = !!m;
-    m = m || { name: '', role: ROLE.WORKER, workType: WORK_TYPE.GENERAL, phone: '', joinDate: todayStr(), active: true };
+    m = m || { name: '', role: 'worker', workType: '', phone: '', joinDate: todayStr(), active: true };
+    var workTypes = loadWorkTypes();
+    /* 角色下拉数据来自 roles 表 (与用户角色页同步) */
+    var rolesList = (typeof loadRoles === 'function') ? (loadRoles() || []) : [];
+    var roleOptions = rolesList.map(function (r) {
+      return '<option value="' + esc(r.key) + '"' + (r.key === m.role ? ' selected' : '') + '>' + esc(r.name) + '</option>';
+    }).join('');
     var html =
       '<div class="form-section">' +
         '<label class="form-label">姓名 *</label>' +
@@ -125,16 +137,16 @@ async function initMembersPage() {
       '<div class="form-section">' +
         '<label class="form-label">角色</label>' +
         '<select class="input" id="m_role">' +
-          Object.keys(ROLE_TEXT).map(function (r) {
-            return '<option value="' + r + '"' + (r === m.role ? ' selected' : '') + '>' + ROLE_ICON[r] + ' ' + ROLE_TEXT[r] + '</option>';
-          }).join('') +
+          (roleOptions || '<option value="worker">综合维修工</option>') +
         '</select>' +
+        '<div class="form-hint">角色列表与「系统设置 → 用户角色」保持一致</div>' +
       '</div>' +
       '<div class="form-section">' +
         '<label class="form-label">工种</label>' +
         '<select class="input" id="m_workType">' +
-          Object.keys(WORK_TYPE).map(function (k) {
-            return '<option value="' + WORK_TYPE[k] + '"' + (WORK_TYPE[k] === m.workType ? ' selected' : '') + '>' + esc(WORK_TYPE[k]) + '</option>';
+          '<option value=""' + (!m.workType ? ' selected' : '') + '>未指定工种</option>' +
+          workTypes.map(function (w) {
+            return '<option value="' + esc(w.name) + '"' + (w.name === m.workType ? ' selected' : '') + '>' + esc(w.name) + '</option>';
           }).join('') +
         '</select>' +
       '</div>' +

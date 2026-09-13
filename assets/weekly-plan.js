@@ -16,10 +16,11 @@
 async function initWeeklyPlanPage() {
   var user = await requireLogin();
   if (!user) return;
+  if (!requireModule('m_weekly_plan')) return;
   var projects = loadProjects() || [];
   var members = loadMembers().filter(function (m) { return m.active !== false; });
   var rng = getWeekRange(new Date());
-  var state = { projectId: '', startDate: rng.start, endDate: rng.end, tasks: [] };
+  var state = { projectId: '', startDate: rng.start, endDate: rng.end, tasks: [], existingId: '' };
 
   /* 仅有一个项目时自动默认选中 */
   var onlyProject = projects.length === 1 ? projects[0] : null;
@@ -41,6 +42,7 @@ async function initWeeklyPlanPage() {
       '<span>周期</span><strong>7 天</strong>' +
       '</div></div>' +
       '<div class="plan-approve-note">提交后进入审批流程，审批人可在通过前追加工作内容；审批通过后可在「报表浏览 → 周计划」查看，不可修改。</div>' +
+      '<div id="wpApprovalCard"></div>' +
       '<div class="section"><h3>基础信息</h3><div class="form-grid">' +
       '<div class="field-row"><label class="field-label"><span class="required">*</span>关联项目</label>' +
       '<select class="input" id="wpProject"><option value="">-- 选择项目 --</option>' + projectOptions + '</select>' +
@@ -55,7 +57,11 @@ async function initWeeklyPlanPage() {
       '<div class="form-hint">开始日期选定后按 7 天自动补齐, 可手动调整</div></div>' +
       '</div></div>' +
       '<div class="section"><h3>任务列表</h3><div id="wpTasks" class="task-list"></div>' +
-      '<div class="task-list-add-row"><button class="btn-primary" id="wpAdd">+ 添加任务</button></div></div>'
+      '<div class="task-list-add-row"><button class="btn-primary" id="wpAdd">+ 添加任务</button></div></div>' +
+      '<div class="report-actions">' +
+        '<button class="btn btn-primary btn-lg" id="wpSubmit">提交审批</button>' +
+        '<button class="btn btn-default btn-lg" id="wpSaveDraft">保存草稿</button>' +
+      '</div>'
   });
 
   function syncDates() {
@@ -112,7 +118,81 @@ async function initWeeklyPlanPage() {
   state.tasks.push({ title: '', ownerId: '', dueDate: '' });
   paintTasks();
 
-  document.getElementById('wpProject').addEventListener('change', function () { state.projectId = this.value; });
+  /* 审批信息卡: 当「当前 startDate+projectId」已经存在本人提交的非草稿记录时, 顶部展示状态
+   *   pending   → 等待审批, 不可编辑
+   *   approved  → 已通过, 只读
+   *   rejected  → 已驳回, 可点「修改并重新提交」把表单覆盖为该记录内容
+   */
+  function paintApprovalCard() {
+    var host = document.getElementById('wpApprovalCard');
+    if (!host) return;
+    if (!state.projectId || !state.startDate) { host.innerHTML = ''; state.existingId = ''; return; }
+    var plans = loadWeeklyPlans() || [];
+    var hit = plans.filter(function (r) {
+      return r.projectId === state.projectId &&
+        r.startDate === state.startDate &&
+        r.createdBy === user._id &&
+        r.status && r.status !== 'draft';
+    })[0];
+    if (!hit) { host.innerHTML = ''; state.existingId = ''; return; }
+    state.existingId = hit._id;
+    var st = hit.status;
+    var statusText = { pending: '审批中', approved: '已审批通过', rejected: '已驳回' }[st] || st;
+    var cardClass = 'dp-approval-card wp-approval-card wp-approval-' + st;
+    var rows = [];
+    rows.push('<div class="dp-approval-row"><span class="dp-approval-key">状态</span><span>' +
+      '<span class="report-status-tag report-status-' +
+      (st === 'approved' ? 'signed' : st === 'rejected' ? 'rejected' : 'submitted') +
+      '">' + esc(statusText) + '</span></span></div>');
+    if (hit.submitter)      rows.push('<div class="dp-approval-row"><span class="dp-approval-key">提交人</span><span>' + esc(hit.submitter) + '</span></div>');
+    if (hit.submitted_at)   rows.push('<div class="dp-approval-row"><span class="dp-approval-key">提交时间</span><span>' + esc(formatDateTime(hit.submitted_at)) + '</span></div>');
+    if (hit.approver)       rows.push('<div class="dp-approval-row"><span class="dp-approval-key">审批人</span><span>' + esc(hit.approver) + '</span></div>');
+    if (hit.approved_at)    rows.push('<div class="dp-approval-row"><span class="dp-approval-key">审批时间</span><span>' + esc(formatDateTime(hit.approved_at)) + '</span></div>');
+    if (hit.reviewed_by)    rows.push('<div class="dp-approval-row"><span class="dp-approval-key">处理人</span><span>' + esc(hit.reviewed_by) + '</span></div>');
+    if (hit.rejected_at)    rows.push('<div class="dp-approval-row"><span class="dp-approval-key">驳回时间</span><span>' + esc(formatDateTime(hit.rejected_at)) + '</span></div>');
+    if (hit.rejected_reason) rows.push('<div class="dp-approval-row dp-approval-row-reject"><span class="dp-approval-key">驳回原因</span><span>' + esc(hit.rejected_reason) + '</span></div>');
+
+    /* 底部动作: 驳回可"修改并重新提交" / 通过只读 / 审批中可查看但不可改 */
+    var actions = '';
+    if (st === 'rejected') {
+      actions = '<div class="dp-approval-actions">' +
+        '<button class="btn btn-primary btn-lg" id="wpReopen">修改并重新提交</button>' +
+        '<span class="muted" style="font-size:13px;margin-left:8px">修改后将以原 ID 覆盖提交</span>' +
+        '</div>';
+    } else if (st === 'pending') {
+      actions = '<div class="dp-approval-actions">' +
+        '<button class="btn btn-default btn-lg" disabled>等待审批中, 不可编辑</button>' +
+        '</div>';
+    } else if (st === 'approved') {
+      actions = '<div class="dp-approval-actions">' +
+        '<a class="btn btn-default btn-lg" href="plan-browse.html?tab=weekly&id=' + encodeURIComponent(hit._id) + '">在报表浏览中查看</a>' +
+        '</div>';
+    }
+    host.innerHTML = '<div class="' + cardClass + '">' +
+      '<div class="dp-approval-head">' +
+        '<span class="dp-approval-bullet"></span>' +
+        '<span>本周周计划审批信息</span>' +
+      '</div>' +
+      '<div class="dp-approval-body">' + rows.join('') + '</div>' +
+      actions +
+    '</div>';
+
+    /* "修改并重新提交": 把 hit 内容回填到表单, 状态切回 draft 让用户编辑后提交 */
+    var reopenBtn = document.getElementById('wpReopen');
+    if (reopenBtn) reopenBtn.onclick = function () {
+      state.tasks = (hit.tasks || []).map(function (t) {
+        return { title: t.title || '', ownerId: t.ownerId || '', dueDate: t.dueDate || '' };
+      });
+      if (!state.tasks.length) state.tasks.push({ title: '', ownerId: '', dueDate: '' });
+      paintTasks();
+      /* 滚动到顶部 + 提示 */
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      toast('已加载驳回记录, 修改后请点底部「提交审批」', 'info');
+    };
+  }
+  paintApprovalCard();
+
+  document.getElementById('wpProject').addEventListener('change', function () { state.projectId = this.value; paintApprovalCard(); });
 
   /* 开始日期 -> 按周自动补结束日期 (+6 天) */
   document.getElementById('wpStart').addEventListener('change', function () {
@@ -121,19 +201,13 @@ async function initWeeklyPlanPage() {
     var auto = addDaysStr(v, 6);
     if (auto) state.endDate = auto;
     syncDates();
+    paintApprovalCard();
   });
   document.getElementById('wpEnd').addEventListener('change', function () { state.endDate = this.value; });
 
   document.getElementById('wpAdd').addEventListener('click', function () {
     state.tasks.push({ title: '', ownerId: '', dueDate: '' }); paintTasks();
   });
-
-  /* FAB 提交 */
-  var fab = document.createElement('button');
-  fab.className = 'fab'; fab.title = '提交审批'; fab.setAttribute('aria-label', '提交审批');
-  fab.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-  fab.addEventListener('click', submit);
-  document.body.appendChild(fab);
 
   /* 提交后: 清空表单, 自动切到下一周, 不回显已提交内容 */
   function resetToNextWeek() {
@@ -145,26 +219,83 @@ async function initWeeklyPlanPage() {
     paintTasks();
   }
 
-  function submit() {
-    if (projects.length === 0) { toast('系统内尚无项目, 请先在「项目管理」中新建', 'warn'); return; }
-    if (!state.projectId) { toast('请选择关联项目', 'warn'); return; }
+  /* 校验基础信息 + 至少一项任务 */
+  function validateBeforeSubmit() {
+    if (projects.length === 0) { toast('系统内尚无项目, 请先在「项目管理」中新建', 'warn'); return false; }
+    if (!state.projectId) { toast('请选择关联项目', 'warn'); return false; }
     var ok = state.tasks.filter(function (t) { return (t.title || '').trim(); });
-    if (ok.length === 0) { toast('请至少填写一项任务', 'warn'); return; }
-    var rec = {
-      _id: 'wp_' + uuid().substring(0, 12), projectId: state.projectId,
-      startDate: state.startDate, endDate: state.endDate,
-      tasks: state.tasks.filter(function (t) { return (t.title || '').trim(); }),
-      /* 提交即进入审批流: 审批人可在通过前追加工作内容 */
-      status: 'pending',
-      createdBy: user._id,
-      submitter: user.name || '',
-      created_at: new Date().toISOString(), submitted_at: new Date().toISOString()
-    };
-    createWeeklyPlan(rec);  /* 走 /api/weekly-plans */
-    var period = rec.startDate + ' ~ ' + rec.endDate;
-    resetToNextWeek();
-    toast('周计划已提交审批(' + ok.length + ' 项 · ' + period + ')，已为你打开下一周空白表单', 'success');
+    if (ok.length === 0) { toast('请至少填写一项任务', 'warn'); return false; }
+    return true;
   }
+
+  /* 收集当前表单数据为 upsert 记录 */
+  function buildRecord(status) {
+    var filledTasks = state.tasks.filter(function (t) { return (t.title || '').trim(); });
+    var rec = {
+      projectId: state.projectId,
+      startDate: state.startDate, endDate: state.endDate,
+      tasks: filledTasks,
+      status: status,
+      createdBy: user._id
+    };
+    if (status === 'pending') {
+      rec.submitter = user.name || '';
+      rec.submitted_at = new Date().toISOString();
+    }
+    if (status === 'draft') {
+      /* 草稿不写提交人/提交时间, 保留可改 */
+      rec.submitter = '';
+      rec.submitted_at = '';
+    }
+    return rec;
+  }
+
+  /* 保存草稿: 状态 = draft, 不切下一周, 留在本表可继续编辑 */
+  function saveDraft() {
+    if (!validateBeforeSubmit()) return;
+    var rec = buildRecord('draft');
+    /* 如果当前周期已存在由本人提交的非草稿记录(existingId), 走 update 覆盖(状态回到 draft) */
+    if (state.existingId) {
+      rec._id = state.existingId;
+      updateWeeklyPlan(state.existingId, rec);
+      state.existingId = '';
+    } else {
+      rec._id = 'wp_' + uuid().substring(0, 12);
+      rec.created_at = new Date().toISOString();
+      createWeeklyPlan(rec);
+    }
+    var period = rec.startDate + ' ~ ' + rec.endDate;
+    paintApprovalCard();
+    toast('周计划草稿已保存(' + rec.tasks.length + ' 项 · ' + period + ')，可继续编辑或前往提交', 'success');
+  }
+
+  /* 提交审批: confirmDialog 二次确认, 状态 = pending, 切下一周空白表单 */
+  function submitForReview() {
+    if (!validateBeforeSubmit()) return;
+    confirmDialog('提交审批', '提交后周计划将进入审批流程, 审批人通过前可以追加工作内容。审批通过后, 记录将被锁定, 只能在「报表浏览 → 周计划」查看。是否继续?', function () {
+      var rec = buildRecord('pending');
+      if (state.existingId) {
+        /* 驳回后重提: 覆盖原记录, 状态由 rejected → pending, 清除驳回信息 */
+        rec._id = state.existingId;
+        rec.rejected_reason = '';
+        rec.rejected_at = '';
+        rec.reviewed_by = '';
+        updateWeeklyPlan(state.existingId, rec);
+        state.existingId = '';
+      } else {
+        rec._id = 'wp_' + uuid().substring(0, 12);
+        rec.created_at = new Date().toISOString();
+        createWeeklyPlan(rec);
+      }
+      var period = rec.startDate + ' ~ ' + rec.endDate;
+      resetToNextWeek();
+      toast('周计划已提交审批(' + rec.tasks.length + ' 项 · ' + period + ')，已为你打开下一周空白表单', 'success');
+    });
+  }
+
+  /* 绑定操作按钮 (沿用日计划的 .report-actions 风格) */
+  document.getElementById('wpSubmit').addEventListener('click', submitForReview);
+  document.getElementById('wpSaveDraft').addEventListener('click', saveDraft);
 }
 window.initWeeklyPlanPage = initWeeklyPlanPage;
 window.addEventListener('DOMContentLoaded', initWeeklyPlanPage);

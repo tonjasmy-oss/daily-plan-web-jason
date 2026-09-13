@@ -8,7 +8,7 @@ var REPORT_PAGE_SIZE = 10;
 async function initReportsPage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_reports')) return;
   var content = renderPage({
     active: 'reports',
     pageHtml:

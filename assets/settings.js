@@ -6,6 +6,7 @@
 async function initSettingsPage() {
   var user = await requireLogin();
   if (!user) return;
+  if (!requireModule('m_settings')) return;
   if (!isAdmin()) { toast('需要管理员权限', 'warn'); setTimeout(function(){ location.href='dashboard.html'; }, 800); return; }
 
   var s = Object.assign({
@@ -40,6 +41,17 @@ async function initSettingsPage() {
       toggle('自动备份数据', '启用后每周日凌晨自动备份 SQLite 数据库', s.autoBackup) +
       toggle('物资申购需要审批', '启用后,所有物资申购必须经审批通过才能入库', s.purchasePerm) +
       '</div></div>' +
+      '<div class="section"><h3>工种管理</h3>' +
+      '<div class="muted" style="font-size:13px;line-height:1.6;margin-bottom:12px">' +
+      '在此维护成员可选工种。新增成员的工种默认为空,管理员可在下拉中指定。被任一成员使用的工种不允许删除。' +
+      '</div>' +
+      '<div id="wtToolbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+      '<input class="input" id="wtNewName" placeholder="新工种名称, 例: 钢结构焊工" style="max-width:280px">' +
+      '<button class="btn-success" id="wtAdd">添加</button>' +
+      '<button class="btn-ghost" id="wtReset">恢复默认 9 项</button>' +
+      '</div>' +
+      '<div id="wtList"></div>' +
+      '</div>' +
       '<div class="section"><h3>附件存储</h3><div class="form-grid">' +
       field('附件保存路径', 'stUploadPath', sysConf.upload_path, 'text') +
       '<div class="field-row" style="grid-column:1/-1"><label class="field-label">路径说明</label>' +
@@ -85,6 +97,66 @@ async function initSettingsPage() {
     setSetting('general', payload);  /* 走 /api/settings */
     setSetting('system', { upload_path: uploadPath });  /* 附件路径: 后端 get_upload_dir 读取 */
     toast('设置已保存', 'success');
+  });
+
+  /* ===== 工种管理 (数据走 DB.workTypes + /api/work-types) ===== */
+  function renderWorkTypes() {
+    var items = loadWorkTypes();
+    var html;
+    if (!items.length) {
+      html = '<div class="empty muted" style="padding:14px;border:1px dashed var(--border);border-radius:var(--radius-md);text-align:center">暂无工种, 点击右上"恢复默认 9 项"快速填充</div>';
+    } else {
+      html = '<div style="display:grid;gap:8px">' + items.map(function (w) {
+        return '<div data-wt-id="' + esc(w._id) + '" style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--input-bg)">' +
+          '<input class="input wt-name" data-original="' + esc(w.name) + '" value="' + esc(w.name) + '" style="flex:1">' +
+          '<button class="btn-ghost wt-save">保存</button>' +
+          '<button class="btn-danger wt-del">删除</button>' +
+          '</div>';
+      }).join('') + '</div>';
+    }
+    document.getElementById('wtList').innerHTML = html;
+    /* 行内编辑/删除事件 */
+    document.querySelectorAll('#wtList [data-wt-id]').forEach(function (row) {
+      var id = row.getAttribute('data-wt-id');
+      row.querySelector('.wt-save').addEventListener('click', function () {
+        var inp = row.querySelector('.wt-name');
+        var newName = (inp.value || '').trim();
+        var oldName = inp.getAttribute('data-original');
+        if (!newName) { toast('名称不能为空', 'warn'); return; }
+        if (newName === oldName) { toast('未修改', 'info'); return; }
+        updateWorkType(id, { name: newName }).then(function () {
+          toast('已保存', 'success');
+          renderWorkTypes();
+        }).catch(function (e) { toast('保存失败: ' + e.message, 'error'); });
+      });
+      row.querySelector('.wt-del').addEventListener('click', function () {
+        confirmDialog('删除工种', '删除后该工种将从成员下拉中消失(已被使用的成员保留原值), 是否继续?', function () {
+          deleteWorkType(id).then(function () {
+            toast('已删除', 'success');
+            renderWorkTypes();
+          }).catch(function (e) { toast('删除失败: ' + e.message, 'error'); });
+        });
+      });
+    });
+  }
+  renderWorkTypes();
+  document.getElementById('wtAdd').addEventListener('click', function () {
+    var inp = document.getElementById('wtNewName');
+    var name = (inp.value || '').trim();
+    if (!name) { toast('请输入工种名称', 'warn'); return; }
+    createWorkType({ name: name }).then(function () {
+      inp.value = '';
+      toast('已添加', 'success');
+      renderWorkTypes();
+    }).catch(function (e) { toast('添加失败: ' + e.message, 'error'); });
+  });
+  document.getElementById('wtReset').addEventListener('click', function () {
+    confirmDialog('恢复默认工种', '将清空现有工种列表, 然后写入荣总指定的 9 项默认工种, 是否继续?', function () {
+      resetDefaultWorkTypes().then(function () {
+        toast('已恢复默认 9 项', 'success');
+        renderWorkTypes();
+      }).catch(function (e) { toast('恢复失败: ' + e.message, 'error'); });
+    });
   });
 
   /* 打开附件管理页 */

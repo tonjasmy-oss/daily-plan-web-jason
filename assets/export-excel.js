@@ -164,7 +164,7 @@ function exportDailyPlanToExcel(plan, members, onDone) {
 
   /* 2. 人员安排 sheet (夜班/休息/调休) */
   var wsCrew = [];
-  wsCrew.push(['人员安排 — 仅显示角色为「班长」「工人」']);
+  wsCrew.push(['人员安排 — 仅显示角色为「工程主管」「工程班长」「综合维修工」']);
   wsCrew.push(['']);
   wsCrew.push(['类型', '人员名单', '人数']);
   var crew = plan.crew || {};

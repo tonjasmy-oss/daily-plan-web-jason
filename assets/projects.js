@@ -5,7 +5,7 @@
 async function initProjectsPage() {
   var user = await requireLogin();
   if (!user) return;
-
+  if (!requireModule('m_projects')) return;
   var content = renderPage({
     active: 'projects',
     pageHtml:
@@ -151,7 +151,7 @@ async function initProjectsPage() {
         '<select class="input" id="p_managerId">' +
           '<option value="">未指定</option>' +
           members.map(function (m) {
-            return '<option value="' + esc(m._id) + '"' + (m._id === p.managerId ? ' selected' : '') + '>' + esc(m.name) + ' (' + esc(ROLE_TEXT[m.role]) + ')</option>';
+            return '<option value="' + esc(m._id) + '"' + (m._id === p.managerId ? ' selected' : '') + '>' + esc(m.name) + ' (' + esc(roleLabel(m.role)) + ')</option>';
           }).join('') +
         '</select>' +
       '</div>' +
