@@ -146,7 +146,7 @@ async function initPurchaseMgmtPage() {
           '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
           '<button class="btn-success btn-sm" data-act="exp" data-id="' + esc(g._id) + '">导出 Excel</button>' +
           '<button class="btn-ghost btn-sm" data-act="ren" data-id="' + esc(g._id) + '">重命名</button>' +
-          '<button class="btn-ghost btn-sm" data-act="view" data-id="' + esc(g._id) + '">' + (isCur ? '退出查看' : '查看明细') + '</button>' +
+          '<a class="btn-ghost btn-sm" href="purchase-detail.html?group=' + encodeURIComponent(g._id) + '">查看明细</a>' +
           '<button class="btn-danger btn-sm" data-act="unmerge" data-id="' + esc(g._id) + '">解除合并</button>' +
           '</div></div>';
       }).join('');
@@ -311,12 +311,9 @@ async function initPurchaseMgmtPage() {
     toast('已导出「' + title + '」(' + seq + ' 项, 合计 ¥' + num2(grand) + ')', 'success');
   }
 
-  /* 页内切换批次查看, 不做页面跳转 (避免打断在途的防抖同步请求) */
-  function toggleGroupView(gid) {
-    groupFilter = (groupFilter === gid) ? '' : gid;
-    selected = {};
-    paint();
-  }
+  /* 已移除: 批次"查看明细"现在跳到 purchase-detail.html?group=<id>
+   * 这里保留 groupFilter 的 URL 同步逻辑, 但触发入口不再是按钮 */
+  function noopToggle() { /* 已废弃: 保留占位 */ }
 
   function paint() {
     paintKpi();
@@ -424,7 +421,6 @@ async function initPurchaseMgmtPage() {
         var act = b.dataset.act, id = b.dataset.id;
         if (act === 'exp') exportGroup(id);
         else if (act === 'ren') renameGroup(id);
-        else if (act === 'view') toggleGroupView(id);
         else if (act === 'unmerge') unmergeGroup(id);
       });
     }
