@@ -13,7 +13,35 @@
 
 ---
 
-## 第 1 步：上传到服务器（在你的 Windows 电脑上操作）
+## 第 1 步：上传到服务器
+
+**部署包已包含全部内容**：代码 + 数据库 `server/data.db` + 一键部署脚本。
+桌面上只有 `daily-plan-web-jason.tar.gz` 这一个文件就够了，**不需要再单独找 `data.db`**。
+
+### 方式一：用 Xshell（推荐 Xshell 用户）
+
+两种传法，任选：
+
+**1a. Xftp 传输（不用在服务器上装任何东西）**
+
+- Xshell 工具栏点 **Xftp** 图标，或菜单「工具 → Xftp」，或快捷键 `Ctrl+Alt+F`
+- 左边切到本机**桌面**，右边切到服务器 **`/tmp`**
+- 把 `daily-plan-web-jason.tar.gz` 拖到右边
+
+**1b. ZMODEM 上传（`rz`）**
+
+```bash
+sudo apt update && sudo apt install -y lrzsz
+```
+```bash
+cd /tmp && rz -be
+```
+执行 `rz -be` 后 **Xshell 会自动弹出文件选择框**，选中桌面的
+`daily-plan-web-jason.tar.gz`，等进度跑完即可。
+
+> 也可以直接把文件从桌面**拖进 Xshell 窗口**（Xshell 7 支持）。
+
+### 方式二：用 PowerShell + scp
 
 打开 **PowerShell**（开始菜单搜索 "PowerShell"），粘贴执行：
 
@@ -34,6 +62,9 @@ scp daily-plan-web-jason.tar.gz ubuntu@101.35.112.52:/tmp/
 ---
 
 ## 第 2 步：登录服务器
+
+- **Xshell 用户**：你已经登录了，**直接跳到第 3 步**
+- **PowerShell / 终端用户**：
 
 ```bash
 ssh ubuntu@101.35.112.52
