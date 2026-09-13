@@ -231,34 +231,83 @@ async function initPurchaseMgmtPage() {
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
 
+  /* 导出格式参照实物申购单样例:
+   * 标题「项目名 YYYY年M月 工程用品申购单」居中大字 → 第二行 项目名称/申购日期 →
+   * 明细列: 序号 品名 规格/型号 单位 数量 单价(元) 金额 备注 → 绿色「本月物资合计」行 */
   function exportGroup(gid) {
     var g = groupById(gid);
     if (!g) { toast('批次不存在', 'warn'); return; }
     var members = recordsInGroup(gid);
     if (!members.length) { toast('批次内暂无申购记录', 'warn'); return; }
-    var head = ['序号', '申购日期', '关联项目', '申请人', '明细内容', '合计金额(元)', '状态', '审批人', '审批时间', '备注'];
-    var th = head.map(function (h) {
-      return '<th style="background:#F3F4F6;border:1px solid #D1D5DB;padding:6px 10px;font-size:12px;font-weight:bold">' + h + '</th>';
-    }).join('');
-    var trs = members.map(function (r, i) {
-      var sm = STATUS_MAP[r.status] || STATUS_MAP.submitted;
-      var items = Array.isArray(r.items) ? r.items : [];
-      var detail = items.length
-        ? items.map(function (it) { return (it.name || '') + '×' + (it.qty || '') + (it.unit || ''); }).join('；')
-        : (r.name || '');
-      var tds = [i + 1, r.date || '', projName(r.projectId || r.project_id), r.applicant || '', detail,
-        (Number(r.total) || 0).toFixed(2), sm.label, r.approver || r.reviewed_by || '',
-        ((r.approved_at || r.rejected_at || '').slice(0, 16) || '').replace('T', ' '), r.reason || ''];
-      return '<tr>' + tds.map(function (v) {
-        return '<td style="border:1px solid #D1D5DB;padding:6px 10px;font-size:12px">' + esc(String(v)) + '</td>';
-      }).join('') + '</tr>';
-    }).join('');
+    members = members.slice().sort(function (a, b) { return (a.date || '') < (b.date || '') ? -1 : 1; });
+
+    /* 标题要素: 项目名 (多项目用顿号连接) + 年月 */
+    var projs = [], dates = [];
+    members.forEach(function (r) {
+      var pn = projName(r.projectId || r.project_id);
+      if (projs.indexOf(pn) < 0) projs.push(pn);
+      if (r.date && dates.indexOf(r.date) < 0) dates.push(r.date);
+    });
+    dates.sort();
+    var firstDate = dates[0] || todayStr();
+    var ym = (firstDate.match(/^(\d{4})-(\d{1,2})/) || []);
+    var title = projs.join('、') + ' ' + (ym[1] || '') + '年' + parseInt(ym[2] || '1', 10) + '月工程用品申购单';
+    var projLabel = projs.join('、');
+    var dateLabel = dates.length === 1
+      ? dates[0].replace(/-/g, '.')
+      : (dates[0] + ' ~ ' + dates[dates.length - 1]).replace(/-/g, '.');
+
+    /* 列宽 (px) */
+    var W = [36, 150, 170, 48, 56, 68, 80, 130];
+    var B = 'border:1px solid #000';
+    function cell(v, style) { return '<td style="' + B + ';padding:4px 6px;font-size:11px;' + (style || '') + '">' + esc(String(v == null ? '' : v)) + '</td>'; }
+    function num2(n) { return (Number(n) || 0).toFixed(2); }
+
+    var rows = '<tr>' + W.map(function (w) { return '<td style="' + B + '" width="' + w + '" height="22"></td>'; }).join('') + '</tr>';
+    /* 标题 + 项目/日期行 */
+    rows += '<tr><td colspan="8" style="font-size:18px;font-weight:bold;text-align:center;height:34px">' + esc(title) + '</td></tr>';
+    rows += '<tr>' +
+      '<td colspan="4" style="font-size:12px;font-weight:bold;text-align:left;height:24px">项目名称：' + esc(projLabel) + '</td>' +
+      '<td colspan="4" style="font-size:12px;font-weight:bold;text-align:right">申购日期：' + esc(dateLabel) + '</td></tr>';
+    /* 表头 */
+    var head = ['序号', '品名', '规格/型号', '单位', '数量', '单价\n(元)', '金额', '备注'];
+    rows += '<tr>' + head.map(function (h) {
+      return '<td style="' + B + ';font-size:12px;font-weight:bold;text-align:center;height:26px;white-space:pre">' + h + '</td>';
+    }).join('') + '</tr>';
+
+    /* 明细: 每笔申购的 items 逐行铺开, 备注取用途说明 */
+    var seq = 0, grand = 0;
+    members.forEach(function (r) {
+      grand += Number(r.total) || 0;
+      var items = (Array.isArray(r.items) && r.items.length) ? r.items :
+        [{ name: r.name || '', spec: r.spec || '', unit: r.unit || '', qty: r.qty || 0, price: 0, usage: r.reason || '' }];
+      items.forEach(function (it) {
+        seq++;
+        var q = Number(it.qty) || 0, p = Number(it.price) || 0;
+        rows += '<tr>' +
+          cell(seq, 'text-align:center') +
+          cell(it.name || '', 'text-align:center') +
+          cell(it.spec || '', 'text-align:center') +
+          cell(it.unit || '', 'text-align:center') +
+          cell(q, 'text-align:center') +
+          cell(num2(p), 'text-align:center') +
+          cell(num2(q * p), 'text-align:center') +
+          cell(it.usage || '', 'text-align:center') +
+          '</tr>';
+      });
+    });
+    /* 绿色合计行 */
+    rows += '<tr>' +
+      '<td colspan="5" style="' + B + ';background:#92D050;font-size:12px;font-weight:bold;text-align:center;height:24px">本月物资合计</td>' +
+      '<td style="' + B + ';background:#92D050"></td>' +
+      '<td style="' + B + ';background:#92D050;font-size:12px;font-weight:bold;text-align:center">' + esc(num2(grand)) + '</td>' +
+      '<td style="' + B + ';background:#92D050"></td>' +
+      '</tr>';
+
     var html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body>' +
-      '<p style="font-size:14px;font-weight:bold">' + esc(g.name) + ' — 物资申购汇总 (' + members.length + '笔, 合计 ¥' +
-      (members.reduce(function (s, r) { return s + (Number(r.total) || 0); }, 0)).toFixed(2) + ')</p>' +
-      '<table style="border-collapse:collapse"><tr>' + th + '</tr>' + trs + '</table></body></html>';
-    downloadXls(g.name + '.xls', html);
-    toast('已导出「' + g.name + '」(' + members.length + ' 条)', 'success');
+      '<table style="border-collapse:collapse">' + rows + '</table></body></html>';
+    downloadXls(title + '.xls', html);
+    toast('已导出「' + title + '」(' + seq + ' 项, 合计 ¥' + num2(grand) + ')', 'success');
   }
 
   /* 页内切换批次查看, 不做页面跳转 (避免打断在途的防抖同步请求) */

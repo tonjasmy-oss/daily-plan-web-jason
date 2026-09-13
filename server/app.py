@@ -400,6 +400,7 @@ def row_to_purchase(r):
         'rejected_at': _col(r, 'rejected_at', ''),
         'rejected_reason': _col(r, 'rejected_reason', ''),
         'reviewed_by': _col(r, 'reviewed_by', ''),
+        'merge_id': _col(r, 'merge_id', ''),
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
     }
 
