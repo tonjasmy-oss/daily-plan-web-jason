@@ -33,9 +33,11 @@ Thumbs.db
 .vscode/
 .idea/
 
-# WorkBuddy 内部缓存（不算源码改动）
-.workbuddy/cache/
-.workbuddy/screenshots/
+# WorkBuddy 内部缓存 / 记忆 / 临时文件（不算源码改动）
+.workbuddy/
+.workbuddy_*.txt
+.tmp_*.txt
+.tmp_*.log
 
 # 临时检查脚本 (我的 _check_* / _simulate_* / _http_check_*)
 _check_*.js
