@@ -8,7 +8,9 @@
  * 本文件只提供函数与常量，不做任何页面初始化，也不依赖任何页面专属 DOM。
  *
  * 依赖: common.js (DB 缓存 / loadXxx / esc / getMember / formatDateTime /
- *                  planAppendable / planAppendTasks / canApprovePlan / queryParam)
+ *                  planAppendable / planAppendItem / canApprovePlan / queryParam /
+ *                  追加与修改表单组件: appendTaskFormHtml / readAppendTaskForm /
+ *                  editPlanFormHtml / readEditPlanForm / bindPeoplePickers)
  * 导出功能(Excel/图片/PDF)依赖 export-excel.js / export-media.js ——
  *   这两个文件只在报表浏览页加载，本文件内所有调用点都做了 typeof 守卫。
  * ============================================================ */
@@ -52,6 +54,7 @@ var PB_SVG_CLOSE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" 
 var PB_SVG_PHOTO = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="9.5" r="1.6" stroke="currentColor" stroke-width="1.6"/><path d="M4 17l4.5-4.5L13 17l3-2.5 4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 var PB_SVG_EXCEL = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9.5 12.5l4 5M13.5 12.5l-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 var PB_SVG_PDF = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.5 17v-4h1.6a1.2 1.2 0 0 1 0 2.4H8.5M13 17v-4h1a1.6 1.6 0 0 1 0 4h-1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+var PB_SVG_EDIT = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 20h4l10-10a2.4 2.4 0 0 0-3.4-3.4L4.6 16.6 4 20Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 7.5l3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
 
 /* ------------------------------------------------------------
  * 数据源 (common.js 内存缓存, 登录时随 bootstrap 一起加载)
@@ -276,6 +279,7 @@ function pbDailyDetail(rec) {
     (st === 'rejected'
       ? pbMeta('驳回时间', esc(pbTime(rec.rejected_at))) + pbMeta('驳回原因', esc(rec.rejected_reason))
       : pbMeta('审批时间', esc(pbTime(rec.approved_at)))) +
+    pbEditedMeta(rec) +
     '</div>';
 
   var rows = (rec.tasks || []).map(function (t, i) {
@@ -312,9 +316,12 @@ function pbWeeklyDetail(rec) {
     (st === 'rejected'
       ? pbMeta('驳回原因', esc(rec.rejected_reason))
       : pbMeta('审批时间', esc(pbTime(rec.approved_at)))) +
+    pbEditedMeta(rec) +
     '</div>';
 
-  var rows = (rec.tasks || []).filter(function (t) { return (t.title || '').trim(); })
+  /* 审批追加的条目单独成块 —— 它带的是「工作要求 / 实施人员 / 计划完成时间」,
+   * 塞进周任务表格(责任人/完成时间两列)会把工作要求丢掉 */
+  var rows = (rec.tasks || []).filter(function (t) { return !t.appended && (t.title || '').trim(); })
     .map(function (t, i) {
       return [
         '<span class="col-num">' + (i + 1) + '</span>',
@@ -323,10 +330,15 @@ function pbWeeklyDetail(rec) {
         esc(t.dueDate)
       ];
     });
+  var apN = pbAppendCount(rec, 'weekly');
 
   return meta +
     pbBlock('周任务清单', '共 ' + rows.length + ' 项',
-      pbTable(['#', '任务内容', '责任人', '计划完成时间'], rows));
+      pbTable(['#', '任务内容', '责任人', '计划完成时间'], rows)) +
+    (apN
+      ? pbBlock('审批追加工作内容', '共 ' + apN + ' 条', pbAppendList(rec.tasks) +
+          '<div class="pb-append-note">审批人在通过前追加的工作内容，随周计划一并归档</div>')
+      : '');
 }
 
 function pbReportDetail(rec) {
@@ -369,7 +381,8 @@ function pbReportDetail(rec) {
     pbBlock('签名', '', sign);
 }
 
-/* 审批追加的条目列表 (周报 / 计划类记录共用) */
+/* 审批追加的条目列表 (周报 / 计划类记录共用)
+ * 条目字段与填报任务同口径: 工作内容 + 工作要求 + 实施人员 + 计划完成时间 */
 function pbAppendList(items) {
   var rows = (items || []).filter(function (t) { return t && t.appended; });
   if (!rows.length) return '';
@@ -377,13 +390,34 @@ function pbAppendList(items) {
     var text = t.content || t.title || '';
     var who = t.appended_by ? '审批追加 · ' + esc(t.appended_by) : '审批追加';
     var when = t.appended_at ? ' · ' + esc(pbTime(t.appended_at)) : '';
+    var fields = '';
+    if (t.requirement) {
+      fields += '<div class="pb-append-field"><span class="pb-append-key">工作要求</span>' +
+        '<span class="pb-append-val">' + esc(t.requirement) + '</span></div>';
+    }
+    if (Array.isArray(t.members) && t.members.length) {
+      fields += '<div class="pb-append-field"><span class="pb-append-key">实施人员</span>' +
+        '<span class="pb-append-val">' + esc(pbNames(t.members)) + '</span></div>';
+    }
+    var time = [t.startTime, t.endTime].filter(Boolean).join(' ~ ');
+    if (time) {
+      fields += '<div class="pb-append-field"><span class="pb-append-key">计划完成</span>' +
+        '<span class="pb-append-val">' + esc(time) + '</span></div>';
+    }
     return '<div class="pb-append-item">' +
       '<span class="pb-append-ord">补</span>' +
       '<div class="pb-append-main">' +
         '<div class="pb-append-meta">' + who + when + '</div>' +
         '<div class="pb-append-text">' + esc(text) + '</div>' +
+        (fields ? '<div class="pb-append-fields">' + fields + '</div>' : '') +
       '</div></div>';
   }).join('') + '</div>';
+}
+
+/* 审批人修改过填报内容的留痕 (无修改则返回空串) */
+function pbEditedMeta(rec) {
+  if (!rec || !rec.edited_by) return '';
+  return pbMeta('审批人修改', esc(rec.edited_by) + (rec.edited_at ? ' · ' + esc(pbTime(rec.edited_at)) : ''));
 }
 
 /* 计划周报: 周期 + 工作摘要 + 审批补充事项 */
@@ -398,6 +432,7 @@ function pbWeeklyReportDetail(rec) {
     (st === 'rejected'
       ? pbMeta('驳回时间', esc(pbTime(rec.rejected_at))) + pbMeta('驳回原因', esc(rec.rejected_reason))
       : pbMeta('审批时间', esc(pbTime(rec.approved_at)))) +
+    pbEditedMeta(rec) +
     '</div>';
 
   var apN = pbAppendCount(rec, 'wr');
@@ -475,7 +510,10 @@ function pbSavePlan(rec, tab, patch) {
   else if (tab === 'wr') updateWeeklyReport(rec._id, rec);
 }
 
-/* 审批操作区: 仅「审批人 + 待审批」时出现 */
+/* 审批操作区: 仅「审批人 + 待审批」时出现
+ *   - 追加工作内容: 工作内容 / 工作要求 / 计划实施人员 / 计划完成时间 (四项必填)
+ *     与填报页的任务字段完全同口径, 追加后随计划一并归档与导出
+ *   - 修改填报内容: 审批人可就地修订填报件 (留痕 edited_by / edited_at) */
 function pbApproveBox(rec, tab) {
   if (tab !== 'daily' && tab !== 'weekly' && tab !== 'wr') return '';
   var user = (typeof getCurrentUser === 'function') ? getCurrentUser() : null;
@@ -488,13 +526,15 @@ function pbApproveBox(rec, tab) {
   return '<div class="pb-approve-box">' +
     '<div class="pb-approve-head">审批操作' +
       '<span class="sec-meta">' + (n ? '已追加 ' + n + ' 条 · ' : '') +
-      (isWr ? '可先追加补充事项再通过' : '可先追加工作内容再通过') + '</span></div>' +
+      (isWr ? '可先追加补充事项再通过' : '可先追加工作内容再通过') + '</span>' +
+      '<button class="btn btn-default btn-sm pb-edit-start" type="button">' +
+        PB_SVG_EDIT + '<span>修改填报内容</span></button>' +
+    '</div>' +
     '<div class="pb-approve-cols">' +
       '<div class="pb-approve-col">' +
-        '<label class="pb-approve-label" for="pbAppendInput">' + fieldLabel +
-          ' <span class="pb-approve-opt">选填 · 一行一条</span></label>' +
-        '<textarea class="textarea pb-append-input" id="pbAppendInput" rows="2" ' +
-          'placeholder="' + (isWr ? '例如：下周需同步提交消防验收资料' : '例如：补充检查 3 层临边防护') + '"></textarea>' +
+        '<label class="pb-approve-label">' + fieldLabel +
+          ' <span class="pb-approve-opt">工作内容 / 工作要求 / 实施人员 / 完成时间 均必填</span></label>' +
+        appendTaskFormHtml() +
         '<div class="pb-approve-row">' +
           '<button class="btn btn-default pb-append" type="button">' + addLabel + '</button>' +
         '</div>' +
@@ -522,6 +562,128 @@ function pbAfterDecide(rec, tab) {
   if (typeof window.pbAfterDecide === 'function') { window.pbAfterDecide(rec, tab); return; }
   if (window.pbRefreshList) window.pbRefreshList();
   pbOpenDetail(rec, tab, { keepUrl: true });
+}
+
+/* ------------------------------------------------------------
+ * 详情视图与审批区 (可重渲染)
+ *
+ * 追加工作内容、修改填报内容之后都需要原地刷新详情, 所以把
+ * 「渲染 + 绑定」收拢在这里; pbOpenDetail 只负责搭外壳。
+ * ------------------------------------------------------------ */
+function pbRenderView(ov, rec, tab, opts) {
+  opts = opts || {};
+  var view = ov.querySelector('.pb-view');
+  if (!view) return;
+
+  function paint() {
+    view.hidden = false;
+    view.innerHTML = pbDetailHtml(rec, tab) + pbApproveBox(rec, tab);
+    bindPeoplePickers(view);       /* 追加表单里的人员选择器 */
+    bindEditEntry();
+    bindApproveActions();
+  }
+
+  /* 「修改填报内容」入口 (仅审批人 + 待审批, 由 pbApproveBox 决定是否出现) */
+  function bindEditEntry() {
+    var btn = view.querySelector('.pb-edit-start');
+    if (btn) btn.onclick = function () { pbOpenEdit(ov, rec, tab, opts); };
+  }
+
+  function bindApproveActions() {
+    var appendBtn = view.querySelector('.pb-append');
+    if (appendBtn) appendBtn.onclick = function () {
+      var res = readAppendTaskForm(view);
+      if (res.error) {
+        toast(res.error, 'warn');
+        var el = res.sel ? view.querySelector(res.sel) : null;
+        if (el && el.focus) el.focus();
+        return;
+      }
+      planAppendItem(rec, makeAppendedTask(res.task.content, getCurrentUser(), res.task),
+                     planAppendField(tab));
+      pbSavePlan(rec, tab);        /* 条目已写入 rec, 这里落库 */
+      toast('已追加 1 条' + (tab === 'wr' ? '补充事项' : '工作内容'), 'success');
+      if (window.pbRefreshList) window.pbRefreshList();
+      paint();
+    };
+    var okBtn = view.querySelector('.pb-approve-ok');
+    if (okBtn) okBtn.onclick = function () {
+      var u = getCurrentUser() || {};
+      pbSavePlan(rec, tab, {
+        status: 'approved',
+        approver: u.name || '',
+        approved_at: new Date().toISOString(),
+        reviewed_by: u.name || '',
+        rejected_reason: '', rejected_at: ''
+      });
+      toast('已审批通过，记录已锁定', 'success');
+      pbAfterDecide(rec, tab);
+    };
+    var rjBtn = view.querySelector('.pb-approve-rj');
+    if (rjBtn) rjBtn.onclick = function () {
+      var ta = view.querySelector('.pb-reject-input');
+      var reason = ((ta && ta.value) || '').trim();
+      if (!reason) { toast('请填写驳回原因', 'warn'); return; }
+      var u = getCurrentUser() || {};
+      pbSavePlan(rec, tab, {
+        status: 'rejected',
+        reviewed_by: u.name || '',
+        rejected_at: new Date().toISOString(),
+        rejected_reason: reason
+      });
+      toast('已驳回', 'warn');
+      pbAfterDecide(rec, tab);
+    };
+  }
+
+  paint();
+}
+
+/* 在详情弹层内就地切到「修改填报内容」表单
+ * 保存后写回记录并留痕 (edited_by / edited_at), 再回到只读详情 */
+function pbOpenEdit(ov, rec, tab, opts) {
+  var view = ov.querySelector('.pb-view');
+  var edit = ov.querySelector('.pb-edit');
+  if (!view || !edit) return;
+  edit.innerHTML =
+    '<div class="pb-edit-head">修改填报内容' +
+      '<span class="sec-meta">修改会记录操作人与时间；保存后仍可继续追加或审批</span></div>' +
+    editPlanFormHtml(rec, tab) +
+    '<div class="pb-edit-actions">' +
+      '<button class="btn btn-primary pb-edit-save" type="button">保存修改</button>' +
+      '<button class="btn btn-secondary pb-edit-cancel" type="button">取消</button>' +
+    '</div>';
+  view.hidden = true;
+  edit.hidden = false;
+  bindPeoplePickers(edit);
+
+  edit.querySelector('.pb-edit-cancel').onclick = function () {
+    edit.hidden = true;
+    view.hidden = false;
+    edit.innerHTML = '';
+  };
+  edit.querySelector('.pb-edit-save').onclick = function () {
+    var res = readEditPlanForm(edit, rec, tab);
+    if (res.error) {
+      toast(res.error, 'warn');
+      if (res.sel) {
+        var el = edit.querySelector(res.sel);
+        if (el && el.focus) el.focus();
+      }
+      return;
+    }
+    var u = (typeof getCurrentUser === 'function') ? (getCurrentUser() || {}) : {};
+    pbSavePlan(rec, tab, Object.assign({}, res.patch, {
+      edited_by: u.name || '',
+      edited_at: new Date().toISOString()
+    }));
+    edit.hidden = true;
+    view.hidden = false;
+    edit.innerHTML = '';
+    toast('填报内容已修改', 'success');
+    pbRenderView(ov, rec, tab, opts);
+    if (window.pbRefreshList) window.pbRefreshList();
+  };
 }
 
 /* ------------------------------------------------------------
@@ -566,7 +728,10 @@ function pbOpenDetail(rec, tab, opts) {
           '<button class="modal-close" type="button" aria-label="关闭">' + PB_SVG_CLOSE + '</button>' +
         '</span>' +
       '</div>' +
-      '<div class="modal-body">' + pbDetailHtml(rec, tab) + pbApproveBox(rec, tab) + '</div>' +
+      '<div class="modal-body">' +
+        '<div class="pb-view"></div>' +
+        '<div class="pb-edit" hidden></div>' +
+      '</div>' +
       '<div class="modal-footer">' +
         exportGroup +
         '<button class="btn-secondary pb-close" type="button">关闭</button>' +
@@ -603,45 +768,8 @@ function pbOpenDetail(rec, tab, opts) {
     if (typeof pbExportMedia !== 'function') { toast('导出组件未加载', 'error'); return; }
     pbExportMedia(rec, tab, 'pdf');
   });
-  /* ---- 审批操作 (内联) ---- */
-  var appendBtn = ov.querySelector('.pb-append');
-  if (appendBtn) appendBtn.onclick = function () {
-    var ta = ov.querySelector('.pb-append-input');
-    var n = planAppendTasks(rec, ta && ta.value, getCurrentUser(), planAppendField(tab));
-    if (n === 0) { toast('请填写要追加的内容', 'warn'); return; }
-    pbSavePlan(rec, tab);                       /* 内容已写入 rec 的条目数组, 这里落库 */
-    toast('已追加 ' + n + ' 条' + (tab === 'wr' ? '补充事项' : '工作内容'), 'success');
-    if (window.pbRefreshList) window.pbRefreshList();
-    pbOpenDetail(rec, tab, { keepUrl: true, noExport: opts.noExport });
-  };
-  var okBtn = ov.querySelector('.pb-approve-ok');
-  if (okBtn) okBtn.onclick = function () {
-    var u = getCurrentUser() || {};
-    pbSavePlan(rec, tab, {
-      status: 'approved',
-      approver: u.name || '',
-      approved_at: new Date().toISOString(),
-      reviewed_by: u.name || '',
-      rejected_reason: '', rejected_at: ''
-    });
-    toast('已审批通过，记录已锁定', 'success');
-    pbAfterDecide(rec, tab);
-  };
-  var rjBtn = ov.querySelector('.pb-approve-rj');
-  if (rjBtn) rjBtn.onclick = function () {
-    var ta = ov.querySelector('.pb-reject-input');
-    var reason = (ta && ta.value || '').trim();
-    if (!reason) { toast('请填写驳回原因', 'warn'); return; }
-    var u = getCurrentUser() || {};
-    pbSavePlan(rec, tab, {
-      status: 'rejected',
-      reviewed_by: u.name || '',
-      rejected_at: new Date().toISOString(),
-      rejected_reason: reason
-    });
-    toast('已驳回', 'warn');
-    pbAfterDecide(rec, tab);
-  };
+  /* ---- 详情与审批区 (含人员选择器绑定) ---- */
+  pbRenderView(ov, rec, tab, opts);
 
   ov.addEventListener('mousedown', function (e) { if (e.target === ov) ov._bg = true; });
   ov.addEventListener('click', function (e) {

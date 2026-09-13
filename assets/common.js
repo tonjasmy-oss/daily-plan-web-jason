@@ -1231,13 +1231,17 @@ function planAppendable(rec, user) {
 
 /* 生成一条"审批追加"的工作内容
  * 注意: 日计划任务字段名是 content, 周计划是 title —— 两个都写,
- * 两种记录(以及各自的导出/详情渲染)才能通用 */
-function makeAppendedTask(content, user) {
+ * 两种记录(以及各自的导出/详情渲染)才能通用
+ * extra: { requirement, members[], startTime, endTime } —— 与填报页的任务字段同口径 */
+function makeAppendedTask(content, user, extra) {
   var text = String(content || '').trim();
+  var ex = extra || {};
   return {
     id: 'ap' + Math.random().toString(36).slice(2, 9),
     content: text, title: text,
-    requirement: '', members: [], startTime: '', endTime: '',
+    requirement: String(ex.requirement || '').trim(),
+    members: Array.isArray(ex.members) ? ex.members.slice() : [],
+    startTime: ex.startTime || '', endTime: ex.endTime || '',
     appended: true,
     appended_by: (user && user.name) || '',
     appended_at: new Date().toISOString()
@@ -1250,17 +1254,36 @@ function planAppendField(tab) {
   return tab === 'wr' ? 'items' : 'tasks';
 }
 
-/* 逐行追加工作内容到记录, 返回成功追加的条数 (空行忽略)
- * field 省略时按 tasks 处理, 保持既有调用不变 */
-function planAppendTasks(rec, text, user, field) {
-  if (!rec) return 0;
+/* 追加一条"审批追加"条目到记录, 成功返回 true
+ * field 省略时按 tasks 处理 (计划周报用 items) */
+function planAppendItem(rec, item, field) {
+  if (!rec || !item) return false;
   var key = field || 'tasks';
-  var lines = String(text || '').split(/\r?\n/).map(function (s) { return s.trim(); })
-    .filter(function (s) { return !!s; });
-  if (lines.length === 0) return 0;
   if (!Array.isArray(rec[key])) rec[key] = [];
-  lines.forEach(function (line) { rec[key].push(makeAppendedTask(line, user)); });
-  return lines.length;
+  rec[key].push(item);
+  return true;
+}
+
+/* 修改记录里某条"审批追加"条目的字段 (审批人修订自己追加的内容) */
+function planUpdateAppended(rec, itemId, patch, field) {
+  var key = field || 'tasks';
+  var list = (rec && rec[key]) || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].id === itemId) {
+      Object.assign(list[i], patch || {});
+      return true;
+    }
+  }
+  return false;
+}
+
+/* 移除记录里某条"审批追加"条目 */
+function planRemoveAppended(rec, itemId, field) {
+  var key = field || 'tasks';
+  if (!rec || !Array.isArray(rec[key])) return false;
+  var before = rec[key].length;
+  rec[key] = rec[key].filter(function (t) { return !(t && t.appended && t.id === itemId); });
+  return rec[key].length < before;
 }
 
 /* 记录里被审批追加的条目数 (field 省略时按 tasks 处理) */
@@ -1268,6 +1291,304 @@ function planAppendedCount(rec, field) {
   var key = field || 'tasks';
   return ((rec && rec[key]) || []).filter(function (t) { return t && t.appended; }).length;
 }
+
+/* ============================================================
+ * 审批人表单组件: 追加工作内容 / 修改填报内容
+ *
+ * 两个入口共用同一套表单:
+ *   1) 填报页 (daily-plan.js)     待审批窗口内点「追加工作内容」
+ *   2) 详情弹层 (plan-shared.js)  审批管理页 / 报表浏览页的审批操作区
+ *
+ * 字段与填报页的任务完全同口径:
+ *   工作内容 / 工作要求 / 计划实施人员 / 计划完成时间 (四项必填)
+ *
+ * ⚠️ 人员选择必须内联实现, 不能用 multiSelectDialog —— 后者一打开就
+ *    清空页面里所有 .modal-overlay, 会把所在弹层一起销毁。
+ * ============================================================ */
+var TASK_MEMBER_ROLES = ['lead', 'foreman', 'worker'];   /* 与填报页 DP_ALLOWED_ROLES 一致 */
+
+function taskMemberList() {
+  return (loadMembers() || []).filter(function (m) {
+    return m.active !== false && TASK_MEMBER_ROLES.indexOf(m.role) >= 0;
+  });
+}
+function taskMemberName(id) {
+  var m = (typeof getMember === 'function') ? getMember(id) : null;
+  return (m && m.name) ? m.name : String(id || '');
+}
+function taskMemberNames(ids) {
+  return (ids || []).map(taskMemberName).filter(Boolean).join('、');
+}
+function taskRoleText(role) {
+  if (typeof ROLE_DISPLAY !== 'undefined' && ROLE_DISPLAY && ROLE_DISPLAY[role]) return ROLE_DISPLAY[role];
+  return (typeof roleLabel === 'function' && roleLabel(role)) || role || '';
+}
+
+/* 内联人员选择: 已选 chips + 可展开的勾选面板
+ * 读取时直接收集 .pp-chip 的 data-id, 不维护额外的 JS 状态 */
+function peoplePickerHtml(ids) {
+  var sel = (ids || []).slice();
+  var list = taskMemberList();
+  return '<div class="pp">' +
+    '<div class="pp-chips">' +
+      (sel.length ? peopleChipsHtml(sel) : '<span class="pp-placeholder">尚未选择人员</span>') +
+    '</div>' +
+    '<button class="pp-add" type="button">+ 选择人员</button>' +
+    '<div class="pp-panel" hidden>' +
+      (list.length
+        ? list.map(function (m) {
+            var on = sel.indexOf(m._id) >= 0;
+            return '<label class="pp-row' + (on ? ' is-selected' : '') + '" data-id="' + esc(m._id) + '">' +
+              '<input type="checkbox"' + (on ? ' checked' : '') + '>' +
+              '<span class="pp-name">' + esc(m.name) + '</span>' +
+              '<span class="pp-role">' + esc(taskRoleText(m.role)) + '</span>' +
+            '</label>';
+          }).join('')
+        : '<div class="pp-none">暂无可选人员</div>') +
+    '</div>' +
+  '</div>';
+}
+function peopleChipsHtml(ids) {
+  return (ids || []).map(function (id) {
+    return '<span class="pp-chip" data-id="' + esc(id) + '">' +
+      '<span class="pp-chip-name">' + esc(taskMemberName(id)) + '</span>' +
+      '<button class="pp-chip-x" type="button" title="移除">×</button>' +
+    '</span>';
+  }).join('');
+}
+/* 取某容器内已选人员 id */
+function ppChipIds(el) {
+  if (!el) return [];
+  return Array.prototype.map.call(el.querySelectorAll('.pp-chip'), function (c) { return c.dataset.id; });
+}
+/* 绑定作用域内所有人员选择器 (事件委托, 可重复调用) */
+function bindPeoplePickers(scope) {
+  (scope || document).querySelectorAll('.pp').forEach(function (pp) {
+    if (pp.dataset.ppBound) return;
+    pp.dataset.ppBound = '1';
+    var panel = pp.querySelector('.pp-panel');
+    var chips = pp.querySelector('.pp-chips');
+    var addBtn = pp.querySelector('.pp-add');
+
+    function sync() {
+      var ids = Array.prototype.map.call(pp.querySelectorAll('.pp-row input:checked'), function (cb) {
+        return cb.closest('.pp-row').dataset.id;
+      });
+      chips.innerHTML = ids.length ? peopleChipsHtml(ids) : '<span class="pp-placeholder">尚未选择人员</span>';
+      pp.querySelectorAll('.pp-row').forEach(function (row) {
+        row.classList.toggle('is-selected', !!row.querySelector('input:checked'));
+      });
+    }
+    if (addBtn && panel) {
+      addBtn.addEventListener('click', function () {
+        panel.hidden = !panel.hidden;
+        addBtn.textContent = panel.hidden ? '+ 选择人员' : '收起';
+      });
+    }
+    pp.addEventListener('change', function (e) {
+      if (e.target && e.target.matches && e.target.matches('input[type=checkbox]')) sync();
+    });
+    /* chips 上的 × : 反查并取消对应勾选 */
+    pp.addEventListener('click', function (e) {
+      var x = (e.target && e.target.closest) ? e.target.closest('.pp-chip-x') : null;
+      if (!x) return;
+      e.preventDefault();
+      var chip = x.closest('.pp-chip');
+      var id = chip && chip.dataset.id;
+      var row = id ? pp.querySelector('.pp-row[data-id="' + id + '"]') : null;
+      if (row) {
+        var cb = row.querySelector('input');
+        if (cb) cb.checked = false;
+      }
+      if (chip) chip.remove();
+      if (!chips.querySelector('.pp-chip')) chips.innerHTML = '<span class="pp-placeholder">尚未选择人员</span>';
+      if (row) row.classList.remove('is-selected');
+    });
+  });
+}
+
+/* ---------- 追加工作内容表单 (四件套) ---------- */
+function appendTaskFormHtml() {
+  return '<div class="appt-form">' +
+    '<div class="appt-field appt-full">' +
+      '<label class="form-label">工作内容 <span class="required">*</span></label>' +
+      '<textarea class="textarea appt-content" rows="2" placeholder="例如：补充检查 3 层临边防护"></textarea>' +
+    '</div>' +
+    '<div class="appt-field appt-full">' +
+      '<label class="form-label">工作要求 <span class="required">*</span></label>' +
+      '<textarea class="textarea appt-requirement" rows="2" placeholder="本条追加内容的工作要求 / 验收标准"></textarea>' +
+    '</div>' +
+    '<div class="appt-field">' +
+      '<label class="form-label">计划实施人员 <span class="required">*</span></label>' +
+      peoplePickerHtml([]) +
+    '</div>' +
+    '<div class="appt-field">' +
+      '<label class="form-label">计划完成时间 <span class="required">*</span></label>' +
+      '<div class="appt-time">' +
+        '<input class="input appt-start" type="time">' +
+        '<span class="appt-time-sep">至</span>' +
+        '<input class="input appt-end" type="time">' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+/* 读取 + 校验追加表单, 返回 { task } 或 { error, sel } */
+function readAppendTaskForm(scope) {
+  var f = (scope || document).querySelector('.appt-form');
+  if (!f) return { error: '表单未就绪', sel: '' };
+  var task = {
+    content: (f.querySelector('.appt-content').value || '').trim(),
+    requirement: (f.querySelector('.appt-requirement').value || '').trim(),
+    members: ppChipIds(f),
+    startTime: (f.querySelector('.appt-start').value || ''),
+    endTime: (f.querySelector('.appt-end').value || '')
+  };
+  if (!task.content) return { error: '请填写追加的工作内容', sel: '.appt-content' };
+  if (!task.requirement) return { error: '请填写工作要求', sel: '.appt-requirement' };
+  if (!task.members.length) return { error: '请选择计划实施人员', sel: '.pp-add' };
+  if (!task.startTime || !task.endTime) return { error: '请填写计划完成时间', sel: '.appt-start' };
+  return { task: task };
+}
+
+/* ---------- 修改填报内容表单 (仅审批人 + 待审批窗口) ---------- */
+function crewEditHtml(key, label, ids) {
+  return '<div class="edt-crew-item" data-crew="' + esc(key) + '">' +
+    '<label class="form-label">' + esc(label) + '</label>' +
+    peoplePickerHtml(ids || []) +
+  '</div>';
+}
+function editPlanFormHtml(rec, tab) {
+  if (tab === 'wr') {
+    return '<div class="edt-form">' +
+      '<div class="edt-field edt-full">' +
+        '<label class="form-label">本周工作摘要</label>' +
+        '<textarea class="textarea edt-summary" rows="6">' + esc(rec.summary || '') + '</textarea>' +
+      '</div>' +
+    '</div>';
+  }
+  if (tab === 'weekly') {
+    var opts = (loadProjects() || []).map(function (p) {
+      return '<option value="' + esc(p._id) + '"' + (rec.projectId === p._id ? ' selected' : '') + '>' +
+        esc(p.name) + '</option>';
+    }).join('');
+    var wrows = (rec.tasks || []).map(function (t, i) {
+      if (t.appended) return '';
+      var owners = '<option value="">未指定</option>' + taskMemberList().map(function (m) {
+        return '<option value="' + esc(m._id) + '"' + (t.ownerId === m._id ? ' selected' : '') + '>' +
+          esc(m.name) + '</option>';
+      }).join('');
+      return '<div class="edt-task" data-i="' + i + '">' +
+        '<div class="edt-task-num">' + (i + 1) + '</div>' +
+        '<div class="edt-task-body">' +
+          '<div class="edt-field edt-full"><label class="edt-label">计划工作内容</label>' +
+            '<textarea class="textarea edt-title" rows="2">' + esc(t.title || '') + '</textarea></div>' +
+          '<div class="edt-field"><label class="edt-label">责任人</label>' +
+            '<select class="input edt-owner">' + owners + '</select></div>' +
+          '<div class="edt-field"><label class="edt-label">计划完成时间</label>' +
+            '<input class="input edt-due" type="date" value="' + esc(t.dueDate || '') + '"></div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+    return '<div class="edt-form">' +
+      '<div class="edt-field edt-full"><label class="form-label">关联项目</label>' +
+        '<select class="input edt-project"><option value="">未关联</option>' + opts + '</select></div>' +
+      (wrows || '<div class="pb-none">无可修改的任务</div>') +
+      (planAppendedCount(rec, 'tasks')
+        ? '<div class="edt-note">审批追加的条目不在修改范围内，如需调整请用下方「追加工作内容」。</div>' : '') +
+    '</div>';
+  }
+  var drows = (rec.tasks || []).map(function (t, i) {
+    if (t.appended) return '';
+    return '<div class="edt-task" data-i="' + i + '">' +
+      '<div class="edt-task-num">' + (i + 1) + '</div>' +
+      '<div class="edt-task-body">' +
+        '<div class="edt-field edt-full"><label class="edt-label">计划工作内容</label>' +
+          '<textarea class="textarea edt-content" rows="2">' + esc(t.content || '') + '</textarea></div>' +
+        '<div class="edt-field edt-full"><label class="edt-label">工作要求</label>' +
+          '<textarea class="textarea edt-requirement" rows="2">' + esc(t.requirement || '') + '</textarea></div>' +
+        '<div class="edt-field"><label class="edt-label">计划实施人员</label>' +
+          peoplePickerHtml(t.members || []) + '</div>' +
+        '<div class="edt-field"><label class="edt-label">计划完成时间</label>' +
+          '<div class="appt-time">' +
+            '<input class="input edt-start" type="time" value="' + esc(t.startTime || '') + '">' +
+            '<span class="appt-time-sep">至</span>' +
+            '<input class="input edt-end" type="time" value="' + esc(t.endTime || '') + '">' +
+          '</div></div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+  var crew = rec.crew || {};
+  return '<div class="edt-form">' +
+    (drows || '<div class="pb-none">无可修改的任务</div>') +
+    '<div class="edt-field edt-full"><label class="form-label">备注</label>' +
+      '<textarea class="textarea edt-remarks" rows="2">' + esc(rec.remarks || '') + '</textarea></div>' +
+    '<div class="edt-crew">' +
+      crewEditHtml('night', '夜间值班', crew.night) +
+      crewEditHtml('rest', '休息人员', crew.rest) +
+      crewEditHtml('adjust', '调休人员', crew.adjust) +
+    '</div>' +
+    (planAppendedCount(rec, 'tasks')
+      ? '<div class="edt-note">审批追加的条目不在修改范围内，如需调整请用下方「追加工作内容」。</div>' : '') +
+  '</div>';
+}
+/* 读取 + 校验修改表单, 返回 { patch } 或 { error, sel }
+ * 规则与填报页对齐: 内容清空 = 删除该任务; 保留的任务必须四项齐全 */
+function readEditPlanForm(scope, rec, tab) {
+  var f = (scope || document).querySelector('.edt-form');
+  if (!f) return { error: '表单未就绪', sel: '' };
+  if (tab === 'wr') {
+    var sum = (f.querySelector('.edt-summary').value || '').trim();
+    if (!sum) return { error: '本周工作摘要不能为空', sel: '.edt-summary' };
+    return { patch: { summary: sum } };
+  }
+  var list = [];
+  var err = '';
+  var isDaily = (tab !== 'weekly');
+  (rec.tasks || []).forEach(function (t, i) {
+    if (t.appended) { list.push(t); return; }
+    var row = f.querySelector('.edt-task[data-i="' + i + '"]');
+    if (!row) { list.push(t); return; }
+    var nt = Object.assign({}, t);
+    if (isDaily) {
+      nt.content = (row.querySelector('.edt-content').value || '').trim();
+      nt.requirement = (row.querySelector('.edt-requirement').value || '').trim();
+      nt.members = ppChipIds(row);
+      nt.startTime = (row.querySelector('.edt-start').value || '');
+      nt.endTime = (row.querySelector('.edt-end').value || '');
+      if (!nt.content) return;
+      if (!err && !nt.requirement) err = '第 ' + (i + 1) + ' 项任务未填写工作要求';
+      if (!err && !nt.members.length) err = '第 ' + (i + 1) + ' 项任务未选择计划实施人员';
+      if (!err && (!nt.startTime || !nt.endTime)) err = '第 ' + (i + 1) + ' 项任务未填写计划完成时间';
+    } else {
+      nt.title = (row.querySelector('.edt-title').value || '').trim();
+      nt.ownerId = (row.querySelector('.edt-owner').value || '');
+      nt.dueDate = (row.querySelector('.edt-due').value || '');
+      if (!nt.title) return;
+      if (!err && !nt.ownerId) err = '第 ' + (i + 1) + ' 项任务未选择责任人';
+      if (!err && !nt.dueDate) err = '第 ' + (i + 1) + ' 项任务未填写计划完成时间';
+    }
+    list.push(nt);
+  });
+  if (err) return { error: err, sel: '' };
+  if (!list.filter(function (t) { return !t.appended; }).length) {
+    return { error: '至少保留一项任务内容', sel: '' };
+  }
+  if (isDaily) {
+    var crew = {};
+    f.querySelectorAll('.edt-crew [data-crew]').forEach(function (el) {
+      crew[el.dataset.crew] = ppChipIds(el);
+    });
+    return {
+      patch: {
+        tasks: list,
+        remarks: (f.querySelector('.edt-remarks').value || '').trim(),
+        crew: crew
+      }
+    };
+  }
+  return { patch: { tasks: list, projectId: (f.querySelector('.edt-project').value || '') } };
+}
+
 
 /* ===== HTML 转义 ===== */
 function esc(str) {

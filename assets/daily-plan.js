@@ -205,7 +205,8 @@ async function initDailyPlanPage() {
     for (var i = 0; i < form.tasks.length; i++) {
       var t = form.tasks[i];
       if (!(t.content || '').trim()) continue;
-      /* 审批追加的条目只需工作内容, 不参与必填校验(工作要求/人员/时间由原计划承担) */
+      /* 审批追加的条目由审批人按同一套必填规则(内容/要求/人员/时间)填写,
+       * 这里不再重复校验, 避免审批人加的内容挡住填报人提交原计划 */
       if (t.appended) continue;
       if (!(t.requirement || '').trim()) { highlightTaskFieldError(i, 'requirement'); toast('请填写任务"' + (i + 1) + '"的工作要求', 'error'); return false; }
       if (!t.members || t.members.length === 0) { highlightTaskFieldError(i, 'members'); toast('请勾选任务"' + (i + 1) + '"的计划实施人员', 'error'); return false; }
@@ -305,24 +306,29 @@ async function initDailyPlanPage() {
       }
     );
   }
-  /* ---------- 审批追加工作内容 ---------- */
+  /* ---------- 审批追加工作内容 (四件套, 与填报任务同口径) ---------- */
   function appendWork() {
     if (!canAppend()) return;
     confirmDialogEx('追加工作内容',
       '<div class="form-section">' +
-        '<label class="form-label">补充的工作内容 <span class="required">*</span></label>' +
-        '<textarea class="textarea" id="dp_append_text" rows="4" placeholder="一行一条, 可一次填写多条。例如:&#10;补充检查 3 层临边防护&#10;跟进消防通道清理"></textarea>' +
         '<p class="form-hint">追加内容会排在原计划之后并标记为「审批追加」，通过后随计划一并归档与导出；通过前可逐条移除。</p>' +
-      '</div>',
+      '</div>' + appendTaskFormHtml(),
       function () {
-        var el = document.getElementById('dp_append_text');
-        var n = planAppendTasks(form, el && el.value, user);
-        if (n === 0) { toast('请填写要追加的工作内容', 'error'); return false; }
+        var res = readAppendTaskForm(document);
+        if (res.error) {
+          toast(res.error, 'error');
+          var el = res.sel ? document.querySelector(res.sel) : null;
+          if (el && el.focus) el.focus();
+          return false;                     /* 校验不通过则不关闭弹窗 */
+        }
+        planAppendItem(form, makeAppendedTask(res.task.content, user, res.task));
         persist();
-        toast('已追加 ' + n + ' 条工作内容', 'success');
+        toast('已追加 1 条工作内容', 'success');
         render();
       }
     );
+    /* 弹层已同步插入 DOM, 这里补绑人员选择器的交互 */
+    bindPeoplePickers(document);
   }
   function deleteRecord() {
     confirmDialog('确认删除', '删除后无法恢复,确定删除此日的日计划?', function () {
@@ -596,9 +602,14 @@ async function initDailyPlanPage() {
     '</div>';
   }
 
-  /* 渲染"审批追加"条目 */
+  /* 渲染"审批追加"条目 (与填报任务同字段: 内容 / 工作要求 / 实施人员 / 完成时间) */
   function renderAppendedRow(t, i) {
     var removable = canAppend();
+    var who = (t.members || []).map(function (mid) {
+      var m = members.find(function (mm) { return mm._id === mid; });
+      return m ? m.name : '';
+    }).filter(Boolean).join('、');
+    var time = [t.startTime, t.endTime].filter(Boolean).join(' 至 ');
     return '<div class="rp-task-row rp-task-row-appended" data-i="' + i + '">' +
       '<div class="rp-task-num rp-task-num-appended">补</div>' +
       '<div class="rp-task-body">' +
@@ -610,6 +621,15 @@ async function initDailyPlanPage() {
           '</label>' +
           '<div class="rp-task-appended-text">' + esc(t.content || '') + '</div>' +
         '</div>' +
+        (t.requirement
+          ? '<div class="rp-task-field"><label class="rp-task-label">工作要求</label>' +
+            '<div class="rp-task-appended-text">' + esc(t.requirement) + '</div></div>' : '') +
+        (who
+          ? '<div class="rp-task-field"><label class="rp-task-label">计划实施人员</label>' +
+            '<div class="rp-task-appended-text">' + esc(who) + '</div></div>' : '') +
+        (time
+          ? '<div class="rp-task-field"><label class="rp-task-label">计划完成时间</label>' +
+            '<div class="rp-task-appended-text">' + esc(time) + '</div></div>' : '') +
       '</div>' +
       '<div class="rp-task-side-actions">' +
         (removable ? '<button class="rp-append-remove" data-i="' + i + '" type="button" title="移除这条追加内容">' + rpIconTrash() + '</button>' : '') +

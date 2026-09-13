@@ -148,6 +148,8 @@ CREATE TABLE IF NOT EXISTS daily_plans (
   rejected_at TEXT DEFAULT '',
   rejected_reason TEXT DEFAULT '',
   reviewed_by TEXT DEFAULT '',
+  edited_by TEXT DEFAULT '',
+  edited_at TEXT DEFAULT '',
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
@@ -171,6 +173,8 @@ CREATE TABLE IF NOT EXISTS weekly_plans (
   rejected_at TEXT DEFAULT '',
   rejected_reason TEXT DEFAULT '',
   reviewed_by TEXT DEFAULT '',
+  edited_by TEXT DEFAULT '',
+  edited_at TEXT DEFAULT '',
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
@@ -189,6 +193,8 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
   rejected_at TEXT DEFAULT '',
   rejected_reason TEXT DEFAULT '',
   reviewed_by TEXT DEFAULT '',
+  edited_by TEXT DEFAULT '',
+  edited_at TEXT DEFAULT '',
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
@@ -403,6 +409,7 @@ def row_to_daily_plan(r):
         'submitted_at': r['submitted_at'], 'approver': r['approver'],
         'approved_at': r['approved_at'], 'rejected_at': r['rejected_at'],
         'rejected_reason': r['rejected_reason'], 'reviewed_by': r['reviewed_by'],
+        'editedBy': _col(r, 'edited_by', ''), 'editedAt': _col(r, 'edited_at', ''),
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
     }
 
@@ -425,6 +432,7 @@ def row_to_weekly_plan(r):
         'rejected_at': _col(r, 'rejected_at', ''),
         'rejected_reason': _col(r, 'rejected_reason', ''),
         'reviewed_by': _col(r, 'reviewed_by', ''),
+        'editedBy': _col(r, 'edited_by', ''), 'editedAt': _col(r, 'edited_at', ''),
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
     }
 
@@ -440,6 +448,7 @@ def row_to_weekly_report(r):
         'rejected_at': _col(r, 'rejected_at', ''),
         'rejected_reason': _col(r, 'rejected_reason', ''),
         'reviewed_by': _col(r, 'reviewed_by', ''),
+        'editedBy': _col(r, 'edited_by', ''), 'editedAt': _col(r, 'edited_at', ''),
         'created_at': r['created_at'], 'updated_at': r['updated_at'],
     }
 
@@ -632,6 +641,10 @@ def migrate_db():
                 ('plan_date', "TEXT DEFAULT ''"),
                 ('categories_json', "TEXT DEFAULT '{}'"),
             ],
+            'daily_plans': [
+                ('edited_by', "TEXT DEFAULT ''"),
+                ('edited_at', "TEXT DEFAULT ''"),
+            ],
             'weekly_plans': [
                 ('start_date', "TEXT DEFAULT ''"),
                 ('end_date', "TEXT DEFAULT ''"),
@@ -641,11 +654,15 @@ def migrate_db():
                 ('rejected_at', "TEXT DEFAULT ''"),
                 ('rejected_reason', "TEXT DEFAULT ''"),
                 ('reviewed_by', "TEXT DEFAULT ''"),
+                ('edited_by', "TEXT DEFAULT ''"),
+                ('edited_at', "TEXT DEFAULT ''"),
             ],
             'weekly_reports': [
                 ('rejected_at', "TEXT DEFAULT ''"),
                 ('rejected_reason', "TEXT DEFAULT ''"),
                 ('reviewed_by', "TEXT DEFAULT ''"),
+                ('edited_by', "TEXT DEFAULT ''"),
+                ('edited_at', "TEXT DEFAULT ''"),
             ],
             'purchases': [
                 ('total', "REAL DEFAULT 0"),
@@ -1333,15 +1350,16 @@ def upsert_daily_plan(conn, data):
               data.get('remarks', ''), data.get('submitter', ''),
               data.get('submitted_at', ''), data.get('approver', ''),
               data.get('approved_at', ''), data.get('rejected_at', ''),
-              data.get('rejected_reason', ''), data.get('reviewed_by', ''))
+              data.get('rejected_reason', ''), data.get('reviewed_by', ''),
+              data.get('edited_by', ''), data.get('edited_at', ''))
     old = conn.execute('SELECT id FROM daily_plans WHERE id=?', (did,)).fetchone()
     if old:
         conn.execute(
-            'UPDATE daily_plans SET date=?,plan_date=?,status=?,tasks_json=?,crew_json=?,remarks=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,updated_at=? WHERE id=?',
+            'UPDATE daily_plans SET date=?,plan_date=?,status=?,tasks_json=?,crew_json=?,remarks=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,edited_by=?,edited_at=?,updated_at=? WHERE id=?',
             fields + (now, did))
     else:
         conn.execute(
-            'INSERT INTO daily_plans (id,date,plan_date,status,tasks_json,crew_json,remarks,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO daily_plans (id,date,plan_date,status,tasks_json,crew_json,remarks,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,edited_by,edited_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (did,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return did
@@ -1370,14 +1388,16 @@ def upsert_weekly_plan(conn, data):
               data.get('approver', ''), data.get('approved_at', ''),
               data.get('rejected_at', '') or (_col(old, 'rejected_at', '') if old else ''),
               data.get('rejected_reason', '') or (_col(old, 'rejected_reason', '') if old else ''),
-              data.get('reviewed_by', '') or (_col(old, 'reviewed_by', '') if old else ''))
+              data.get('reviewed_by', '') or (_col(old, 'reviewed_by', '') if old else ''),
+              data.get('edited_by', '') or (_col(old, 'edited_by', '') if old else ''),
+              data.get('edited_at', '') or (_col(old, 'edited_at', '') if old else ''))
     if old:
         conn.execute(
-            'UPDATE weekly_plans SET week_start=?,week_end=?,start_date=?,end_date=?,project_id=?,tasks_json=?,created_by=?,title=?,status=?,content=?,members_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,updated_at=? WHERE id=?',
+            'UPDATE weekly_plans SET week_start=?,week_end=?,start_date=?,end_date=?,project_id=?,tasks_json=?,created_by=?,title=?,status=?,content=?,members_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,edited_by=?,edited_at=?,updated_at=? WHERE id=?',
             fields + (now, wid))
     else:
         conn.execute(
-            'INSERT INTO weekly_plans (id,week_start,week_end,start_date,end_date,project_id,tasks_json,created_by,title,status,content,members_json,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO weekly_plans (id,week_start,week_end,start_date,end_date,project_id,tasks_json,created_by,title,status,content,members_json,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,edited_by,edited_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (wid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return wid
@@ -1394,15 +1414,16 @@ def upsert_weekly_report(conn, data):
               data.get('submitter', ''), data.get('submitted_at', ''),
               data.get('approver', ''), data.get('approved_at', ''),
               data.get('rejected_at', ''), data.get('rejected_reason', ''),
-              data.get('reviewed_by', ''))
+              data.get('reviewed_by', ''),
+              data.get('edited_by', ''), data.get('edited_at', ''))
     old = conn.execute('SELECT id FROM weekly_reports WHERE id=?', (wid,)).fetchone()
     if old:
         conn.execute(
-            'UPDATE weekly_reports SET week_start=?,week_end=?,title=?,status=?,summary=?,items_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,updated_at=? WHERE id=?',
+            'UPDATE weekly_reports SET week_start=?,week_end=?,title=?,status=?,summary=?,items_json=?,submitter=?,submitted_at=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,edited_by=?,edited_at=?,updated_at=? WHERE id=?',
             fields + (now, wid))
     else:
         conn.execute(
-            'INSERT INTO weekly_reports (id,week_start,week_end,title,status,summary,items_json,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO weekly_reports (id,week_start,week_end,title,status,summary,items_json,submitter,submitted_at,approver,approved_at,rejected_at,rejected_reason,reviewed_by,edited_by,edited_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (wid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return wid

@@ -141,7 +141,7 @@ function exportDailyPlanToExcel(plan, members, onDone) {
       var time = (t.startTime || t.endTime) ? (t.startTime + ' ~ ' + t.endTime) : '-';
       wsMain.push([
         idx + 1,
-        t.content || '',
+        (t.content || '') + (t.appended ? '（审批追加）' : ''),
         t.requirement || '',
         memberListText(t.members),
         time
@@ -233,12 +233,32 @@ function exportWeeklyPlanToExcel(plan, members, onDone) {
   wsData.push(['']);
   wsData.push(['#', '计划工作内容', '责任人', '计划完成时间']);
 
-  var tasks = (plan.tasks || []).filter(function (t) { return (t.title || '').trim(); });
+  var tasks = (plan.tasks || []).filter(function (t) { return !t.appended && (t.title || '').trim(); });
   if (tasks.length === 0) {
     wsData.push(['-', '无任务记录', '', '']);
   } else {
     tasks.forEach(function (t, idx) {
       wsData.push([idx + 1, t.title || '', memberName(t.ownerId), t.dueDate || '-']);
+    });
+  }
+  /* 审批追加的工作内容单独成块 —— 它带工作要求 / 实施人员,
+   * 塞进上面 4 列的任务表会把工作要求丢掉 */
+  var apList = (plan.tasks || []).filter(function (t) {
+    return t.appended && ((t.title || t.content || '').trim());
+  });
+  if (apList.length) {
+    wsData.push(['']);
+    wsData.push(['审批追加工作内容（共 ' + apList.length + ' 条）']);
+    wsData.push(['#', '工作内容', '工作要求', '实施人员', '计划完成时间']);
+    apList.forEach(function (t, idx) {
+      var time = (t.startTime || t.endTime) ? (t.startTime + ' ~ ' + t.endTime) : '-';
+      wsData.push([
+        idx + 1,
+        t.content || t.title || '',
+        t.requirement || '',
+        (typeof taskMemberNames === 'function') ? taskMemberNames(t.members) : '',
+        time
+      ]);
     });
   }
   wsData.push(['']);

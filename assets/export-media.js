@@ -173,7 +173,7 @@ function pbxBodyDaily(rec) {
     .map(function (t, i) {
       return [
         String(i + 1),
-        esc(t.content),
+        esc((t.content || '') + (t.appended ? '（审批追加）' : '')),
         esc(t.requirement),
         esc(pbxNames(t.members)),
         esc([t.startTime, t.endTime].filter(Boolean).join(' ~ '))
@@ -204,13 +204,25 @@ function pbxBodyWeekly(rec) {
     ['填报人', esc(pbxName(rec.createdBy))],
     ['提交时间', esc(formatDateTime(rec.submitted_at || rec.created_at))]
   ]);
-  var rows = (rec.tasks || []).filter(function (t) { return (t.title || '').trim(); })
+  var rows = (rec.tasks || []).filter(function (t) { return !t.appended && (t.title || '').trim(); })
     .map(function (t, i) {
       return [String(i + 1), esc(t.title), esc(pbxName(t.ownerId)), esc(t.dueDate)];
     });
+  /* 审批追加的工作内容单独成块 —— 带工作要求 / 实施人员, 塞进 4 列表格会丢字段 */
+  var apRows = (rec.tasks || []).filter(function (t) {
+    return t.appended && ((t.title || t.content || '').trim());
+  }).map(function (t, i) {
+    var time = [t.startTime, t.endTime].filter(Boolean).join(' ~ ');
+    return [String(i + 1), esc(t.content || t.title || ''), esc(t.requirement),
+            esc(pbxNames(t.members)), esc(time)];
+  });
   return meta +
     pbxHeading('周任务清单（共 ' + rows.length + ' 项）') +
-    pbxDataTable(['#', '计划工作内容', '责任人', '计划完成时间'], rows);
+    pbxDataTable(['#', '计划工作内容', '责任人', '计划完成时间'], rows) +
+    (apRows.length
+      ? pbxHeading('审批追加工作内容（共 ' + apRows.length + ' 条）') +
+        pbxDataTable(['#', '工作内容', '工作要求', '实施人员', '计划完成时间'], apRows)
+      : '');
 }
 
 function pbxBodyReport(rec) {
