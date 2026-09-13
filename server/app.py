@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS members (
   login_fail_count INTEGER DEFAULT 0,
   locked_until TEXT DEFAULT '',
   last_login_at TEXT DEFAULT '',
-  last_login_ip TEXT DEFAULT ''
+  last_login_ip TEXT DEFAULT '',
+  name_updated_at TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -333,6 +334,7 @@ def row_to_member(r):
         'pwdUpdatedAt': _f(r, 'pwd_updated_at'),
         'lastLoginAt': _f(r, 'last_login_at'),
         'lastLoginIp': _f(r, 'last_login_ip'),
+        'nameUpdatedAt': _f(r, 'name_updated_at'),
     }
 
 
@@ -665,6 +667,7 @@ def migrate_db():
                 ('locked_until', "TEXT DEFAULT ''"),
                 ('last_login_at', "TEXT DEFAULT ''"),
                 ('last_login_ip', "TEXT DEFAULT ''"),
+                ('name_updated_at', "TEXT DEFAULT ''"),
             ],
         }
         for table, cols in new_cols.items():
@@ -758,6 +761,111 @@ def validate_avatar(avatar):
             or avatar.startswith('https://')):
         return '头像格式不支持，请上传图片文件'
     return None
+
+
+# ---------- 姓名 (身份标识, 改动会级联) ----------
+
+NAME_MIN_LEN = 2
+NAME_MAX_LEN = 20
+# 中文 / 字母 / 数字 / 空格 / 常见姓名符号(·・-_. ) —— 不放 emoji 和控制字符,
+# 姓名会出现在签名、审批流和登录账号里, 脏字符会一路带下去
+NAME_RE = re.compile(r'^[\u4e00-\u9fa5A-Za-z0-9·・\-_. ]+$')
+
+
+def validate_name(name):
+    """返回错误文案; None 表示通过"""
+    name = str(name or '').strip()
+    if not name:
+        return '姓名不能为空'
+    if len(name) < NAME_MIN_LEN:
+        return '姓名至少 %d 个字符' % NAME_MIN_LEN
+    if len(name) > NAME_MAX_LEN:
+        return '姓名最多 %d 个字符' % NAME_MAX_LEN
+    if name.isdigit():
+        return '姓名不能是纯数字（会和手机号登录混淆）'
+    if not NAME_RE.match(name):
+        return '姓名含有不支持的字符，请只用中文、字母、数字或 · - 等符号'
+    return None
+
+
+# 姓名在本系统里既当身份(登录账号之一), 又以「文本」形式散落在多张业务表里。
+# 前端筛选「我的申购 / 我的待办」是按 user.name 直接比对文本的, 所以改姓名
+# 必须把这些历史文本一起改掉 —— 否则当事人一改名, 自己以前提交的东西就
+# 凭空从列表里消失了。
+NAME_TEXT_FIELDS = (
+    ('purchases',       ('applicant', 'approver')),
+    ('approvals',       ('applicant', 'approver')),
+    ('daily_plans',     ('submitter', 'approver', 'reviewed_by')),
+    ('weekly_plans',    ('submitter', 'approver', 'reviewed_by')),
+    ('weekly_reports',  ('submitter', 'approver', 'reviewed_by')),
+    ('reports',         ('approver',)),
+    ('purchase_groups', ('created_by',)),
+)
+
+
+def rename_member_cascade(conn, member_id, old_name, new_name):
+    """把各业务表里存放的旧姓名文本改成新姓名。
+
+    返回 {'purchases.applicant': 3, ...} 形式的变更统计, 便于向用户交代
+    「改了名字，同步了哪些历史记录」。
+    注意 login_logs.member_name 是审计留痕, 故意不跟着改。
+    """
+    old_name = str(old_name or '').strip()
+    new_name = str(new_name or '').strip()
+    if not old_name or not new_name or old_name == new_name:
+        return {}
+    touched = {}
+    have_tables = {row['name'] for row in
+                   conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    for table, cols in NAME_TEXT_FIELDS:
+        if table not in have_tables:
+            continue                      # 老库可能没有这张表
+        for col in cols:
+            cur = conn.execute('UPDATE %s SET %s=? WHERE %s=?' % (table, col, col),
+                               (new_name, old_name))
+            if cur.rowcount:
+                touched['%s.%s' % (table, col)] = cur.rowcount
+    # 忘记密码申请整表按 member_id 归属, 跟着改成新姓名(管理员按名字认人)
+    if 'password_reset_requests' in have_tables:
+        cur = conn.execute(
+            "UPDATE password_reset_requests SET member_name=? "
+            "WHERE member_id=? AND member_name<>?", (new_name, member_id, new_name))
+        if cur.rowcount:
+            touched['password_reset_requests.member_name'] = cur.rowcount
+    return touched
+
+
+def change_member_name(conn, member_id, new_name, old_name=None):
+    """改名(含校验 / 查重 / 级联同步)。
+
+    返回 (err_dict, touched): err_dict 为 None 表示成功。
+    """
+    row = conn.execute('SELECT name FROM members WHERE id=?', (member_id,)).fetchone()
+    if not row:
+        return {'error': '人员不存在', 'code': 'not_found', 'status': 404}, {}
+    old_name = str(row['name'] or '').strip() if old_name is None else str(old_name).strip()
+    new_name = str(new_name or '').strip()
+    if new_name == old_name:
+        return None, {}
+    err = validate_name(new_name)
+    if err:
+        return {'error': err, 'code': 'bad_name', 'status': 400}, {}
+    dup = conn.execute('SELECT name FROM members WHERE name=? AND id<>?',
+                       (new_name, member_id)).fetchone()
+    if dup:
+        return {'error': '已有同事叫「%s」，姓名不能重复（姓名同时也是登录账号）' % new_name,
+                'code': 'dup_name', 'status': 409}, {}
+    # 旧姓名在库里不唯一 -> 按文本级联会把别人的记录也改过来, 宁可拒绝
+    if old_name:
+        cnt = conn.execute('SELECT COUNT(*) AS c FROM members WHERE name=?',
+                           (old_name,)).fetchone()['c']
+        if cnt > 1:
+            return {'error': '系统里有 %d 位同事都叫「%s」，自动改名可能弄乱彼此的记录，'
+                             '请联系管理员配合处理' % (cnt, old_name),
+                    'code': 'ambiguous_old_name', 'status': 409}, {}
+    conn.execute('UPDATE members SET name=?, name_updated_at=? WHERE id=?',
+                 (new_name, now_iso(), member_id))
+    return None, rename_member_cascade(conn, member_id, old_name, new_name)
 
 
 def ensure_member_passwords(conn):
@@ -1035,7 +1143,9 @@ def list_settings(conn):
 def upsert_member(conn, data):
     mid = data.get('_id') or gen_id('m')
     role = normalize_role(conn, data.get('role'))
-    old = conn.execute('SELECT id FROM members WHERE id=?', (mid,)).fetchone()
+    old = conn.execute('SELECT id, name FROM members WHERE id=?', (mid,)).fetchone()
+    old_name = str(old['name'] or '').strip() if old else ''
+    new_name = str(data.get('name', '') or '').strip()
     if old:
         conn.execute(
             'UPDATE members SET name=?,role=?,phone=?,work_type=?,avatar=?,active=?,join_date=?,created_at=? WHERE id=?',
@@ -1058,6 +1168,21 @@ def upsert_member(conn, data):
         except Exception as e:
             print('[warn] 新成员初始密码注入失败: %s' % e)
     conn.commit()
+    # 管理员改了姓名 -> 同步业务表里的旧姓名文本(与个人中心自助改名同一套逻辑)
+    if old_name and new_name and new_name != old_name:
+        cnt = conn.execute('SELECT COUNT(*) AS c FROM members WHERE name=?',
+                           (old_name,)).fetchone()['c']
+        if cnt > 1:
+            # 旧姓名不唯一时按文本改会串到同名的其他人身上, 宁可不改
+            print('[warn] 跳过姓名级联: 「%s」在库里有 %d 人重名, 请先改掉重名再改姓名'
+                  % (old_name, cnt))
+        else:
+            touched = rename_member_cascade(conn, mid, old_name, new_name)
+            if touched:
+                conn.execute('UPDATE members SET name_updated_at=? WHERE id=?', (now_iso(), mid))
+                conn.commit()
+                print('[rename] %s: %s -> %s, 同步 %d 处历史记录'
+                      % (mid, old_name, new_name, sum(touched.values())))
     return mid
 
 
@@ -2076,8 +2201,8 @@ class Handler(BaseHTTPRequestHandler):
             killed = drop_sessions_of(uid, keep_token=current_session_token(self))
             return self._json({'ok': True, 'killedSessions': killed})
 
-        # ---- 修改自己的资料 (手机号 / 头像) ----
-        # 姓名 / 角色 / 工种 保持只读, 只能由管理员在「人员管理」修改
+        # ---- 修改自己的资料 (姓名 / 手机号 / 头像) ----
+        # 角色 / 工种 保持只读, 只能由管理员在「人员管理」修改
         if path == '/api/me/profile' and method in ('PUT', 'POST'):
             if not uid:
                 conn.close()
@@ -2087,6 +2212,8 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 return self._error('人员不存在', 404)
             b = body or {}
+            old_name = str(r['name'] or '').strip()
+            name = str(b.get('name', old_name) or '').strip()
             phone = str(b.get('phone', r['phone']) or '').strip()
             avatar = b.get('avatar', r['avatar'])
             avatar = '' if avatar is None else str(avatar).strip()
@@ -2105,11 +2232,22 @@ class Handler(BaseHTTPRequestHandler):
                     conn.close()
                     return self._json(
                         {'error': '该手机号已被「%s」使用' % dup['name'], 'code': 'dup_phone'}, 409)
+            # 姓名改动: 校验 + 查重 + 把业务表里的旧姓名文本一并改掉
+            synced = {}
+            if name != old_name:
+                err, synced = change_member_name(conn, uid, name, old_name)
+                if err:
+                    conn.close()
+                    return self._json({'error': err['error'], 'code': err['code']},
+                                      err['status'])
             conn.execute('UPDATE members SET phone=?, avatar=? WHERE id=?', (phone, avatar, uid))
             conn.commit()
             fresh = conn.execute('SELECT * FROM members WHERE id=?', (uid,)).fetchone()
             conn.close()
-            return self._json({'ok': True, 'record': row_to_member(fresh)})
+            return self._json({'ok': True, 'record': row_to_member(fresh),
+                               'renamed': bool(name != old_name),
+                               'synced': synced,
+                               'syncedTotal': sum(synced.values())})
 
         # ---- 我的登录记录 (+ 其它在线设备数) ----
         if path == '/api/me/logins' and method == 'GET':

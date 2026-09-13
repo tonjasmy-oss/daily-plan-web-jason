@@ -181,13 +181,22 @@ async function initMePage() {
           '<div class="form-hint">支持 jpg / png，会在浏览器里自动压缩为 160×160 再上传。</div>' +
         '</div>' +
         '<div class="form-section">' +
+          '<label class="form-label">姓名（同时是登录账号）</label>' +
+          '<input class="input" id="meName" type="text" maxlength="20" ' +
+                 'placeholder="2 ~ 20 个字符" value="' + esc(user.name || '') + '">' +
+          '<div class="form-hint">改姓名后，你以前提交的申购、审批、计划里的旧姓名会自动同步为新姓名；' +
+            '用姓名登录时请改用新姓名，手机号登录不受影响。</div>' +
+          (user.nameUpdatedAt ?
+            '<div class="form-hint">上次改名：' + esc(meDateTime(user.nameUpdatedAt)) + '</div>' : '') +
+        '</div>' +
+        '<div class="form-section">' +
           '<label class="form-label">手机号（同时是登录账号）</label>' +
           '<input class="input" id="mePhone" type="tel" inputmode="numeric" maxlength="11" ' +
                  'placeholder="11 位手机号" value="' + esc(user.phone || '') + '">' +
           '<div class="form-hint">改手机号不会自动改密码，当前密码继续有效。</div>' +
         '</div>' +
         '<button class="btn btn-primary" id="btnSaveProfile" type="button">保存资料</button>' +
-        '<div class="muted" style="margin-top:8px;">姓名、角色、工种由管理员在「人员管理」维护，此处只读。</div>' +
+        '<div class="muted" style="margin-top:8px;">角色、工种由管理员在「人员管理」维护，此处只读。</div>' +
       '</div>' +
 
       /* ---------- 登录记录 ---------- */
@@ -381,31 +390,55 @@ async function initMePage() {
       }
     }
 
-    /* ---------- 个人资料：手机号 + 保存 ---------- */
+    /* ---------- 个人资料：姓名 + 手机号 + 保存 ---------- */
     document.getElementById('btnSaveProfile').onclick = function () {
+      var name = (document.getElementById('meName').value || '').trim();
       var phone = (document.getElementById('mePhone').value || '').trim();
+      var nameErr = validateName(name);
+      if (nameErr) {
+        toast(nameErr, 'warn');
+        return;
+      }
       if (phone && !/^1\d{10}$/.test(phone)) {
         toast('手机号应为 11 位数字且以 1 开头', 'warn');
         return;
       }
-      if (pendingAvatar === null && phone === (user.phone || '')) {
+      var renamed = name !== (user.name || '');
+      if (pendingAvatar === null && phone === (user.phone || '') && !renamed) {
         toast('没有需要保存的改动', 'warn');
         return;
       }
-      var patch = { phone: phone };
+      var patch = { name: name, phone: phone };
       if (pendingAvatar !== null) patch.avatar = pendingAvatar;
       var btn = this;
-      btn.disabled = true;
-      updateMyProfile(patch).then(function () {
-        toast('资料已保存');
-        DB.loaded = false;
-        return bootstrapDB();
-      }).then(function () {
-        render();
-      }).catch(function (err) {
-        btn.disabled = false;
-        toast((err && err.message) || '保存失败', 'error');
-      });
+      var doSave = function () {
+        btn.disabled = true;
+        updateMyProfile(patch).then(function (res) {
+          if (res.renamed) {
+            toast('姓名已改为「' + ((res.record && res.record.name) || name) + '」' +
+                  (res.syncedTotal ? '，同步更新了 ' + res.syncedTotal + ' 条历史记录' : ''));
+          } else {
+            toast('资料已保存');
+          }
+          DB.loaded = false;
+          return bootstrapDB();
+        }).then(function () {
+          render();
+        }).catch(function (err) {
+          btn.disabled = false;
+          toast((err && err.message) || '保存失败', 'error');
+        });
+      };
+      if (renamed) {
+        confirmDialog('确认修改姓名？',
+          '姓名将由「' + (user.name || '') + '」改为「' + name + '」。' +
+          '姓名同时也是登录账号，改完之后：请改用新姓名登录（手机号登录不受影响）；' +
+          '你以前提交的申购 / 审批 / 计划里的旧姓名会自动同步成新姓名；' +
+          '登录记录中的历史条目仍保留当时的原姓名。确定要改吗？',
+          doSave);
+      } else {
+        doSave();
+      }
     };
 
     /* ---------- 登录记录 ---------- */

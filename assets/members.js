@@ -166,6 +166,9 @@ async function initMembersPage() {
       '<div class="form-section">' +
         '<label class="form-label">姓名 *</label>' +
         '<input class="input" id="m_name" value="' + esc(m.name) + '" placeholder="必填">' +
+        (isEdit ?
+          '<div class="form-hint">姓名同时是该同事的登录账号，不可与他人重复；' +
+            '改名后，他在申购 / 审批 / 计划中的旧姓名会自动同步为新姓名（登录记录保留原姓名）。</div>' : '') +
       '</div>' +
       '<div class="form-section">' +
         '<label class="form-label">角色</label>' +

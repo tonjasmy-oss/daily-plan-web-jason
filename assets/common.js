@@ -644,10 +644,11 @@ function _apiFail(res, fallback) {
   return e;
 }
 
-/* ---------- 修改自己的资料（手机号 / 头像） ---------- */
-/* 返回 { ok, record }；姓名 / 角色 / 工种 不在可改范围内 */
+/* ---------- 修改自己的资料（姓名 / 手机号 / 头像） ---------- */
+/* 返回 { ok, record, renamed, synced, syncedTotal }；角色 / 工种 不在可改范围内 */
 function updateMyProfile(patch) {
   var body = {};
+  if (patch && patch.name !== undefined) body.name = patch.name;
   if (patch && patch.phone !== undefined) body.phone = patch.phone;
   if (patch && patch.avatar !== undefined) body.avatar = patch.avatar;
   return apiJson('PUT', '/api/me/profile', body).then(function (res) {
@@ -1103,9 +1104,20 @@ function validateProject(p) {
   if (p.endDate && p.startDate && p.endDate < p.startDate) return '结束日期不能早于开始日期';
   return null;
 }
-function validateMember(m) {
-  if (!m.name || !m.name.trim()) return '请输入姓名';
+/* 姓名规则：与后端 server/app.py 的 validate_name 保持一致
+ * 姓名同时是登录账号，且在业务表里以文本形式冗余存放，所以规则必须收口 */
+var MEMBER_NAME_RE = /^[\u4e00-\u9fa5A-Za-z0-9·・\-_. ]+$/;
+function validateName(name) {
+  name = (name || '').trim();
+  if (!name) return '请输入姓名';
+  if (name.length < 2) return '姓名至少 2 个字符';
+  if (name.length > 20) return '姓名最多 20 个字符';
+  if (/^\d+$/.test(name)) return '姓名不能是纯数字（会和手机号登录混淆）';
+  if (!MEMBER_NAME_RE.test(name)) return '姓名含有不支持的字符，请只用中文、字母、数字或 · - 等符号';
   return null;
+}
+function validateMember(m) {
+  return validateName(m.name);
 }
 function validateTask(t) {
   if (!t.title || !t.title.trim()) return '请输入任务标题';
