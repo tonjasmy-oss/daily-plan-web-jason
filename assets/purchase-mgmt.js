@@ -355,7 +355,7 @@ async function initPurchaseMgmtPage() {
         var mergeBadge = r.merge_id
           ? '<span class="chip" style="background:rgba(139,92,246,.15);color:' + MERGE_COLOR + '">已合并 · ' + esc(gname) + '</span>'
           : '';
-        var actions = '<a class="btn-ghost btn-sm" href="purchase.html?ref=' + encodeURIComponent(r._id) + '">查看明细</a>' +
+        var actions = '<a class="btn-ghost btn-sm" href="purchase-detail.html?id=' + encodeURIComponent(r._id) + '">查看明细</a>' +
           (r.status === 'submitted'
             ? '<button class="btn-success btn-sm" data-ok="' + esc(r._id) + '">通过</button>' +
               '<button class="btn-danger btn-sm" data-rj="' + esc(r._id) + '">驳回</button>'
