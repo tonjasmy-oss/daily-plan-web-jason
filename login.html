@@ -57,7 +57,7 @@
       <form id="loginFormEl" autocomplete="on" novalidate>
         <div class="login-form-row">
           <label class="login-label" for="loginAccount">账号</label>
-          <input type="text" id="loginAccount" name="account" class="login-input" placeholder="请输入工号或邮箱" autocomplete="username" required>
+          <input type="text" id="loginAccount" name="account" class="login-input" placeholder="手机号 或 姓名" autocomplete="username" required>
         </div>
         <div class="login-form-row">
           <label class="login-label" for="loginPassword">密码</label>
@@ -65,7 +65,7 @@
         </div>
         <div class="login-meta-row">
           <label><input type="checkbox" id="rememberMe" checked> 记住我</label>
-          <a class="login-forgot" href="#" onclick="event.preventDefault(); toast('请联系管理员重置密码');">忘记密码?</a>
+          <a class="login-forgot" href="#" id="btnForgot">忘记密码?</a>
         </div>
         <button type="submit" class="login-btn" id="btnSubmit">登 录</button>
       </form>
@@ -81,15 +81,14 @@
       </button>
 
       <div class="login-hint">
-        <b>演示账号:</b><code>admin</code>(管理员) · <code>gcg1123</code>(张工)<br>
-        <b>提示:</b>演示模式下密码可任意填写。
+        <b>账号:</b>手机号 或 姓名(如 <code>13800000000</code> / <code>管理员</code>)<br>
+        <b>初始密码:</b>手机号后 6 位;未登记手机号的同事为 <code>123456</code>
       </div>
 
       <div class="login-error" id="loginError"></div>
 
       <div style="display:flex;gap:8px;margin-top:18px;">
         <button type="button" class="btn btn-secondary" style="flex:1;" id="btnGoDashboard">直接进入仪表盘</button>
-        <button type="button" class="btn btn-secondary" style="flex:1;" id="btnResetSeed">重置种子数据</button>
       </div>
     </div>
 

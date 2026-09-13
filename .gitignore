@@ -7,8 +7,12 @@ runtime/
 
 # Server 运行时数据
 server/sessions.json
+server/sessions.json.bak-*
 server/*.db
 server/*.db.bak-*
+server/*.db-journal
+server/*.db-wal
+server/*.db-shm
 server/data/
 server/runtime/
 

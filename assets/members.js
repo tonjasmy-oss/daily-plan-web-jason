@@ -82,6 +82,9 @@ async function initMembersPage() {
           '</div>' +
           '<div class="member-actions">' +
             '<button class="btn-icon" data-act="edit" data-id="' + esc(m._id) + '" title="编辑">✎</button>' +
+            (user.role === 'admin'
+              ? '<button class="btn-icon" data-act="resetpwd" data-id="' + esc(m._id) + '" title="重置登录密码">🔑</button>'
+              : '') +
             (m._id === user._id ? '' :
               '<button class="btn-icon danger" data-act="delete" data-id="' + esc(m._id) + '" title="删除">🗑</button>') +
           '</div>' +
@@ -111,6 +114,36 @@ async function initMembersPage() {
     var m = getMember(id);
     if (!m) return;
     if (btn.dataset.act === 'edit') showMemberDialog(m);
+    if (btn.dataset.act === 'resetpwd') {
+      if (user.role !== 'admin') { toast('只有管理员可以重置密码', 'warn'); return; }
+      var phone = (m.phone || '').trim();
+      var target = phone.length >= 6 ? '手机号后 6 位（' + phone.slice(-6) + '）' : '默认密码 123456';
+      confirmDialogEx(
+        '重置登录密码',
+        '<div class="form-section">' +
+          '<div>确定重置「<b>' + esc(m.name) + '</b>」的登录密码？</div>' +
+          '<div class="form-hint" style="margin-top:10px;">' +
+            '将重置为：<b>' + esc(target) + '</b><br>' +
+            '该成员在所有设备上的登录会被立即注销，需要用新密码重新登录。' +
+          '</div>' +
+        '</div>',
+        function () {
+          resetMemberPassword(id).then(function (res) {
+            confirmDialogEx(
+              '密码已重置',
+              '<div class="form-section">' +
+                '<div class="muted">请把下面这串新密码告知「' + esc(m.name) + '」：</div>' +
+                '<input class="input" readonly value="' + esc(res.password) + '" ' +
+                  'onclick="this.select()" style="margin-top:8px;font-size:16px;letter-spacing:2px;text-align:center;">' +
+                '<div class="form-hint">点击可全选复制。已注销其 ' + (res.killedSessions || 0) + ' 个设备会话。</div>' +
+              '</div>',
+              null
+            );
+          }).catch(function (err) {
+            toast((err && err.message) || '重置失败', 'error');
+          });
+        });
+    }
     if (btn.dataset.act === 'delete') {
       confirmDialog('删除人员', '确定删除 ' + m.name + '？相关项目和任务关联会一并解除。', function () {
         deleteMember(id);

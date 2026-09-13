@@ -553,18 +553,183 @@ function getCurrentUser() {
   }
 }
 
-/* 异步登录：建立服务器会话 + 记住本地用户ID */
-function login(userId) {
+/* 异步登录：账号(手机号/姓名) + 密码，建立服务器会话 + 记住本地用户ID
+ * 失败时抛出的 Error 带 .code：
+ *   missing | no_user | bad_pwd | locked | inactive
+ */
+function login(account, password) {
   return fetch('/api/login', {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ memberId: userId })
-  }).then(function (r) { return r.json(); }).then(function (res) {
-    if (!res.user) throw new Error('登录失败');
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(userId));
+    body: JSON.stringify({ account: account, password: password })
+  }).then(function (r) {
+    return r.json().then(function (res) { res = res || {}; res.__status = r.status; return res; });
+  }).then(function (res) {
+    if (res.__status !== 200 || !res.user) {
+      var e = new Error(res.error || '登录失败');
+      e.code = res.code || 'error';
+      e.status = res.__status;
+      throw e;
+    }
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(res.user._id));
     return res.user;
   });
+}
+
+/* 修改自己的登录密码：成功后其它设备会话会被服务端注销 */
+function changeMyPassword(oldPassword, newPassword) {
+  return fetch('/api/me/password', {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oldPassword: oldPassword, newPassword: newPassword })
+  }).then(function (r) {
+    return r.json().then(function (res) { res = res || {}; res.__status = r.status; return res; });
+  }).then(function (res) {
+    if (res.__status !== 200 || !res.ok) {
+      var e = new Error(res.error || '修改密码失败');
+      e.code = res.code || 'error';
+      throw e;
+    }
+    return res;
+  });
+}
+
+/* 管理员重置某人密码：服务端返回重置后的密码明文(手机号后6位或 123456) */
+function resetMemberPassword(memberId) {
+  return fetch('/api/members/' + encodeURIComponent(memberId) + '/reset-password', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  }).then(function (r) {
+    return r.json().then(function (res) { res = res || {}; res.__status = r.status; return res; });
+  }).then(function (res) {
+    if (res.__status !== 200 || !res.ok) {
+      var e = new Error(res.error || '重置失败');
+      e.code = res.code || 'error';
+      throw e;
+    }
+    return res;   /* { ok, password, name, killedSessions } */
+  });
+}
+
+/* 当前用户的登录账号展示文案 */
+function accountLabelOf(user) {
+  if (!user) return '';
+  return (user.phone || '').trim() || user.name || '';
+}
+
+/* ---------- 统一的 JSON 请求小工具（带 HTTP 状态，便于区分 400/401/403/409） ---------- */
+function apiJson(method, url, payload) {
+  var opt = { method: method, credentials: 'same-origin' };
+  if (payload !== undefined && payload !== null) {
+    opt.headers = { 'Content-Type': 'application/json' };
+    opt.body = JSON.stringify(payload);
+  }
+  return fetch(url, opt).then(function (r) {
+    return r.json().catch(function () { return {}; }).then(function (res) {
+      res = res || {};
+      res.__status = r.status;
+      return res;
+    });
+  });
+}
+
+function _apiFail(res, fallback) {
+  var e = new Error(res.error || fallback);
+  e.code = res.code || 'error';
+  e.status = res.__status;
+  return e;
+}
+
+/* ---------- 修改自己的资料（手机号 / 头像） ---------- */
+/* 返回 { ok, record }；姓名 / 角色 / 工种 不在可改范围内 */
+function updateMyProfile(patch) {
+  var body = {};
+  if (patch && patch.phone !== undefined) body.phone = patch.phone;
+  if (patch && patch.avatar !== undefined) body.avatar = patch.avatar;
+  return apiJson('PUT', '/api/me/profile', body).then(function (res) {
+    if (res.__status !== 200 || !res.ok) throw _apiFail(res, '保存资料失败');
+    return res;
+  });
+}
+
+/* ---------- 我的登录记录 ---------- */
+/* 返回 { logs: [...], otherSessions: N } */
+function loadMyLogins() {
+  return apiJson('GET', '/api/me/logins').then(function (res) {
+    if (res.__status !== 200) throw _apiFail(res, '读取登录记录失败');
+    return res;
+  });
+}
+
+/* ---------- 退出其它设备（保留当前这台） ---------- */
+function logoutOtherDevices() {
+  return apiJson('POST', '/api/me/logout-others', {}).then(function (res) {
+    if (res.__status !== 200 || !res.ok) throw _apiFail(res, '操作失败');
+    return res;
+  });
+}
+
+/* ---------- 忘记密码：提交重置申请（无需登录） ---------- */
+function requestPasswordReset(account, note) {
+  return apiJson('POST', '/api/password-reset-request',
+                 { account: account, note: note || '' }).then(function (res) {
+    if (res.__status !== 200 || !res.ok) throw _apiFail(res, '提交失败');
+    return res;    /* { ok, message } */
+  });
+}
+
+/* ---------- 管理员：忘记密码申请 ---------- */
+function listPasswordResetRequests() {
+  return apiJson('GET', '/api/password-reset-requests').then(function (res) {
+    if (res.__status !== 200) throw _apiFail(res, '读取申请列表失败');
+    return res;    /* { items, pending } */
+  });
+}
+
+function handlePasswordResetRequest(id, status) {
+  return apiJson('POST', '/api/password-reset-requests/' + encodeURIComponent(id),
+                 { status: status || 'done' }).then(function (res) {
+    if (res.__status !== 200 || !res.ok) throw _apiFail(res, '操作失败');
+    return res;
+  });
+}
+
+/* ---------- 头像 / 设备 展示小工具 ---------- */
+
+/* 头像：有图用图，没图用姓名首字 */
+function avatarHtml(user, size) {
+  size = size || 44;
+  var name = (user && user.name) || '?';
+  var av = (user && user.avatar) || '';
+  if (av) {
+    return '<img class="avatar-img" src="' + esc(av) + '" alt="' + esc(name) +
+           '" style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;object-fit:cover;">';
+  }
+  return '<div class="profile-avatar" style="width:' + size + 'px;height:' + size +
+         'px;">' + esc(String(name).charAt(0)) + '</div>';
+}
+
+/* 从 User-Agent 粗略识别设备，只用于显示 */
+function deviceLabel(ua) {
+  ua = String(ua || '');
+  if (!ua) return '未知设备';
+  var os = '电脑';
+  if (/Android/i.test(ua)) os = '安卓';
+  else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS';
+  else if (/Windows/i.test(ua)) os = 'Windows';
+  else if (/Mac OS X/i.test(ua)) os = 'macOS';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+  var br = '浏览器';
+  if (/MicroMessenger/i.test(ua)) br = '微信';
+  else if (/Edg\//i.test(ua)) br = 'Edge';
+  else if (/Chrome\//i.test(ua)) br = 'Chrome';
+  else if (/Firefox\//i.test(ua)) br = 'Firefox';
+  else if (/Safari\//i.test(ua)) br = 'Safari';
+  return os + ' · ' + br;
 }
 
 function logout() {

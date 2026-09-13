@@ -12,10 +12,12 @@
 """
 
 import hashlib
+import hmac
 import io
 import json
 import os
 import re
+import secrets
 import sqlite3
 import threading
 import uuid as _uuid
@@ -69,7 +71,14 @@ CREATE TABLE IF NOT EXISTS members (
   avatar TEXT DEFAULT '',
   active INTEGER DEFAULT 1,
   join_date TEXT DEFAULT '',
-  created_at TEXT DEFAULT ''
+  created_at TEXT DEFAULT '',
+  password_hash TEXT DEFAULT '',
+  password_salt TEXT DEFAULT '',
+  pwd_updated_at TEXT DEFAULT '',
+  login_fail_count INTEGER DEFAULT 0,
+  locked_until TEXT DEFAULT '',
+  last_login_at TEXT DEFAULT '',
+  last_login_ip TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -259,6 +268,28 @@ CREATE TABLE IF NOT EXISTS work_types (
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS login_logs (
+  id TEXT PRIMARY KEY,
+  member_id TEXT DEFAULT '',
+  member_name TEXT DEFAULT '',
+  at TEXT DEFAULT '',
+  ip TEXT DEFAULT '',
+  ua TEXT DEFAULT '',
+  ok INTEGER DEFAULT 1,
+  reason TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_login_logs_member ON login_logs(member_id, at DESC);
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id TEXT PRIMARY KEY,
+  member_id TEXT DEFAULT '',
+  member_name TEXT DEFAULT '',
+  account TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  created_at TEXT DEFAULT '',
+  handled_at TEXT DEFAULT '',
+  handled_by TEXT DEFAULT ''
+);
 """
 
 
@@ -282,12 +313,26 @@ def gen_id(prefix='r'):
 
 # ---------- 行 -> 前端字典（camelCase） ----------
 
+def _f(row, key, default=''):
+    """安全取列: 老库缺列时返回默认值, 不抛异常"""
+    try:
+        v = row[key]
+    except (IndexError, KeyError):
+        return default
+    return default if v is None else v
+
+
 def row_to_member(r):
     return {
         '_id': r['id'], 'name': r['name'], 'role': r['role'],
         'phone': r['phone'], 'workType': r['work_type'],
         'avatar': r['avatar'], 'active': bool(r['active']),
         'joinDate': r['join_date'], 'created_at': r['created_at'],
+        # 账号安全相关 (绝不外传 password_hash / password_salt)
+        'hasPassword': bool(_f(r, 'password_hash')),
+        'pwdUpdatedAt': _f(r, 'pwd_updated_at'),
+        'lastLoginAt': _f(r, 'last_login_at'),
+        'lastLoginIp': _f(r, 'last_login_ip'),
     }
 
 
@@ -612,6 +657,15 @@ def migrate_db():
             'roles': [
                 ('modules_json', "TEXT DEFAULT '[]'"),
             ],
+            'members': [
+                ('password_hash', "TEXT DEFAULT ''"),
+                ('password_salt', "TEXT DEFAULT ''"),
+                ('pwd_updated_at', "TEXT DEFAULT ''"),
+                ('login_fail_count', "INTEGER DEFAULT 0"),
+                ('locked_until', "TEXT DEFAULT ''"),
+                ('last_login_at', "TEXT DEFAULT ''"),
+                ('last_login_ip', "TEXT DEFAULT ''"),
+            ],
         }
         for table, cols in new_cols.items():
             have = {row['name'] for row in conn.execute('PRAGMA table_info(%s)' % table).fetchall()}
@@ -625,8 +679,106 @@ def migrate_db():
 
         _migrate_roles(conn)
         conn.commit()
+
+        ensure_member_passwords(conn)
+        conn.commit()
     finally:
         conn.close()
+
+
+# ---------- 登录密码 ----------
+#
+# 账号 = 手机号 (优先) 或 姓名;  初始密码 = 手机号后 6 位, 没填手机号则 123456。
+# 哈希用标准库 pbkdf2-hmac-sha256, 零第三方依赖。
+
+PWD_MIN_LEN = 6
+PWD_MAX_LEN = 32
+DEFAULT_PASSWORD = '123456'
+LOGIN_MAX_FAIL = 5          # 连续失败次数上限
+LOGIN_LOCK_MINUTES = 5      # 锁定时长(分钟)
+
+
+def hash_password(password, salt=None):
+    """返回 (hash_hex, salt_hex)。带盐 pbkdf2-sha256, 12 万轮。"""
+    salt = salt or secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac('sha256', str(password).encode('utf-8'),
+                             salt.encode('utf-8'), 120000)
+    return dk.hex(), salt
+
+
+def verify_password(password, stored_hash, salt):
+    if not password or not stored_hash or not salt:
+        return False
+    calc, _ = hash_password(password, salt)
+    return hmac.compare_digest(calc, stored_hash)
+
+
+def validate_password(pwd):
+    """返回错误文案; None 表示通过"""
+    pwd = str(pwd or '')
+    if not pwd:
+        return '请输入密码'
+    if len(pwd) < PWD_MIN_LEN:
+        return '密码至少 %d 位' % PWD_MIN_LEN
+    if len(pwd) > PWD_MAX_LEN:
+        return '密码最多 %d 位' % PWD_MAX_LEN
+    if pwd.strip() != pwd:
+        return '密码首尾不能有空格'
+    return None
+
+
+def initial_password_for(phone):
+    """初始密码 = 手机号后 6 位; 没填手机号(或不足 6 位)则用默认密码"""
+    phone = str(phone or '').strip()
+    return phone[-6:] if len(phone) >= 6 else DEFAULT_PASSWORD
+
+
+PHONE_RE = re.compile(r'^1\d{10}$')          # 与现有数据一致: 11 位手机号
+AVATAR_MAX_LEN = 400 * 1024                  # 头像 data URI 上限, 防止把库撑大
+
+
+def validate_phone(phone):
+    """返回错误文案; None 表示通过。允许留空(留空则不能用手机号登录)"""
+    phone = str(phone or '').strip()
+    if not phone:
+        return None
+    if not PHONE_RE.match(phone):
+        return '手机号格式不正确，应为 11 位数字且以 1 开头'
+    return None
+
+
+def validate_avatar(avatar):
+    """头像只接受 data:image/* 或 http(s) 链接, 且限制体积"""
+    avatar = str(avatar or '').strip()
+    if not avatar:
+        return None
+    if len(avatar) > AVATAR_MAX_LEN:
+        return '头像图片太大（超过 %d KB），请换一张或让前端压缩' % (AVATAR_MAX_LEN // 1024)
+    if not (avatar.startswith('data:image/') or avatar.startswith('http://')
+            or avatar.startswith('https://')):
+        return '头像格式不支持，请上传图片文件'
+    return None
+
+
+def ensure_member_passwords(conn):
+    """幂等: 给还没有密码的成员注入初始密码。
+
+    每次启动都跑 —— 这样「导入备份 / 新建人员」后拿到的新成员也能自动获得初始密码,
+    不会出现有账号却永远登不进来的情况。
+    """
+    rows = conn.execute(
+        "SELECT id, name, phone, password_hash FROM members "
+        "WHERE password_hash IS NULL OR password_hash=''").fetchall()
+    if not rows:
+        return
+    for r in rows:
+        pwd = initial_password_for(r['phone'])
+        h, s = hash_password(pwd)
+        conn.execute('UPDATE members SET password_hash=?, password_salt=?, '
+                     'pwd_updated_at=?, login_fail_count=0, locked_until=? WHERE id=?',
+                     (h, s, now_iso(), '', r['id']))
+    print('[migrate] %d 名成员已注入初始密码 (手机号后 6 位 / 无手机号则 %s)'
+          % (len(rows), DEFAULT_PASSWORD))
 
 
 def _migrate_roles(conn):
@@ -684,6 +836,10 @@ def seed_if_empty():
             conn.execute(
                 'INSERT INTO members (id,name,role,phone,work_type,active,join_date,created_at) VALUES (?,?,?,?,?,1,?,?)',
                 (mid, name, role, phone, work_type, today_str(), now))
+            # 初始密码 = 手机号后 6 位
+            h, s = hash_password(initial_password_for(phone))
+            conn.execute('UPDATE members SET password_hash=?, password_salt=?, pwd_updated_at=? WHERE id=?',
+                         (h, s, now_iso(), mid))
             return mid
         admin = add_member('管理员', 'admin', '13800000000', '')
         m1 = add_member('张工', 'lead', '13811111111', '')
@@ -747,6 +903,76 @@ def current_user_id(handler):
     if not m:
         return None
     return _sessions.get(m.group(1))
+
+
+def current_session_token(handler):
+    """取当前请求携带的会话 token (改密码时用于保留本人会话、踢掉其他设备)"""
+    cookies = handler.headers.get('Cookie', '') or ''
+    m = re.search(COOKIE_NAME + '=([A-Za-z0-9]+)', cookies)
+    return m.group(1) if m else None
+
+
+def drop_sessions_of(member_id, keep_token=None):
+    """注销某成员的所有会话(可保留一个), 返回被踢掉的数量"""
+    killed = 0
+    for t in list(_sessions.keys()):
+        if _sessions.get(t) == member_id and t != keep_token:
+            del _sessions[t]
+            killed += 1
+    if killed:
+        save_sessions()
+    return killed
+
+
+def count_sessions_of(member_id, exclude_token=None):
+    return sum(1 for t, m in _sessions.items() if m == member_id and t != exclude_token)
+
+
+# ---------- 登录日志 ----------
+
+LOGIN_LOG_KEEP = 2000       # 全表保留条数上限
+
+
+def log_login(conn, member_id, member_name, ip, ua, ok=True, reason=''):
+    """记录一次登录尝试(成功/失败都记), 并裁掉过老的记录"""
+    try:
+        conn.execute(
+            'INSERT INTO login_logs (id,member_id,member_name,at,ip,ua,ok,reason) '
+            'VALUES (?,?,?,?,?,?,?,?)',
+            (gen_id('ll'), member_id, member_name, now_iso(), ip or '',
+             (ua or '')[:300], 1 if ok else 0, reason or ''))
+        conn.execute(
+            'DELETE FROM login_logs WHERE id NOT IN '
+            '(SELECT id FROM login_logs ORDER BY at DESC LIMIT %d)' % LOGIN_LOG_KEEP)
+        conn.commit()
+    except Exception as e:
+        print('[warn] 登录日志写入失败: %s' % e)
+
+
+def row_to_login_log(r):
+    return {
+        '_id': r['id'], 'memberId': r['member_id'], 'name': r['member_name'],
+        'at': r['at'], 'ip': r['ip'], 'ua': r['ua'],
+        'ok': bool(r['ok']), 'reason': r['reason'],
+    }
+
+
+def list_login_logs(conn, member_id, limit=20):
+    rows = conn.execute(
+        'SELECT * FROM login_logs WHERE member_id=? ORDER BY at DESC LIMIT ?',
+        (member_id, int(limit))).fetchall()
+    return [row_to_login_log(r) for r in rows]
+
+
+# ---------- 忘记密码: 重置申请 ----------
+
+def row_to_reset_request(r):
+    return {
+        '_id': r['id'], 'memberId': r['member_id'], 'name': r['member_name'],
+        'account': r['account'], 'note': r['note'], 'status': r['status'],
+        'created_at': r['created_at'], 'handled_at': r['handled_at'],
+        'handledBy': r['handled_by'],
+    }
 
 
 # ============================================================
@@ -824,6 +1050,13 @@ def upsert_member(conn, data):
              data.get('workType', ''), data.get('avatar', ''),
              1 if data.get('active', True) else 0, data.get('joinDate', ''),
              data.get('created_at') or now_iso()))
+        # 新成员立即获得初始密码(手机号后 6 位 / 无手机号则 123456), 不用重启服务
+        try:
+            h, s = hash_password(initial_password_for(data.get('phone', '')))
+            conn.execute('UPDATE members SET password_hash=?, password_salt=?, pwd_updated_at=? '
+                         'WHERE id=?', (h, s, now_iso(), mid))
+        except Exception as e:
+            print('[warn] 新成员初始密码注入失败: %s' % e)
     conn.commit()
     return mid
 
@@ -1687,16 +1920,75 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(data)
 
         if method == 'POST' and path == '/api/login':
-            mid = (body or {}).get('memberId', '')
-            r = conn.execute('SELECT * FROM members WHERE id=?', (mid,)).fetchone()
-            conn.close()
+            account = str((body or {}).get('account', '') or '').strip()
+            password = str((body or {}).get('password', '') or '')
+            ip = self.client_address[0] if self.client_address else ''
+            ua = self.headers.get('User-Agent', '') or ''
+            if not account or not password:
+                conn.close()
+                return self._json({'error': '请输入账号和密码', 'code': 'missing'}, 400)
+
+            # 账号 = 手机号(优先) 或 姓名
+            r = conn.execute(
+                'SELECT * FROM members WHERE (phone=? AND phone<>\'\') OR name=? '
+                'ORDER BY (phone=? AND phone<>\'\') DESC LIMIT 1',
+                (account, account, account)).fetchone()
             if not r:
-                return self._error('人员不存在', 404)
+                log_login(conn, '', account, ip, ua, ok=False, reason='no_user')
+                conn.close()
+                return self._json({'error': '账号不存在，请检查手机号或姓名', 'code': 'no_user'}, 401)
+
+            if not r['active']:
+                log_login(conn, r['id'], r['name'], ip, ua, ok=False, reason='inactive')
+                conn.close()
+                return self._json({'error': '账号已停用，请联系管理员', 'code': 'inactive'}, 403)
+
+            # 锁定中?
+            locked_until = str(_f(r, 'locked_until') or '')
+            if locked_until and locked_until > now_iso():
+                log_login(conn, r['id'], r['name'], ip, ua, ok=False, reason='locked')
+                conn.close()
+                return self._json({
+                    'error': '密码连续输错，账号已锁定，请 %d 分钟后重试' % LOGIN_LOCK_MINUTES,
+                    'code': 'locked', 'lockedUntil': locked_until}, 423)
+
+            if not verify_password(password, _f(r, 'password_hash'), _f(r, 'password_salt')):
+                fails = int(_f(r, 'login_fail_count', 0) or 0) + 1
+                if fails >= LOGIN_MAX_FAIL:
+                    until = (datetime.now() + timedelta(minutes=LOGIN_LOCK_MINUTES))\
+                        .strftime('%Y-%m-%dT%H:%M:%S')
+                    conn.execute('UPDATE members SET login_fail_count=?, locked_until=? WHERE id=?',
+                                 (0, until, r['id']))
+                    conn.commit()
+                    log_login(conn, r['id'], r['name'], ip, ua, ok=False, reason='locked')
+                    conn.close()
+                    return self._json({
+                        'error': '密码连续输错 %d 次，账号已锁定 %d 分钟'
+                                 % (LOGIN_MAX_FAIL, LOGIN_LOCK_MINUTES),
+                        'code': 'locked'}, 423)
+                conn.execute('UPDATE members SET login_fail_count=? WHERE id=?', (fails, r['id']))
+                conn.commit()
+                log_login(conn, r['id'], r['name'], ip, ua, ok=False,
+                          reason='bad_pwd(%d/%d)' % (fails, LOGIN_MAX_FAIL))
+                conn.close()
+                return self._json({
+                    'error': '密码不正确，还可尝试 %d 次' % (LOGIN_MAX_FAIL - fails),
+                    'code': 'bad_pwd', 'left': LOGIN_MAX_FAIL - fails}, 401)
+
+            # 登录成功
             token = _uuid.uuid4().hex
-            _sessions[token] = mid
+            _sessions[token] = r['id']
             save_sessions()
+            conn.execute('UPDATE members SET login_fail_count=0, locked_until=?, '
+                         'last_login_at=?, last_login_ip=? WHERE id=?',
+                         ('', now_iso(), ip, r['id']))
+            conn.commit()
+            log_login(conn, r['id'], r['name'], ip, ua, ok=True, reason='login')
+            fresh = conn.execute('SELECT * FROM members WHERE id=?', (r['id'],)).fetchone()
+            conn.close()
             cookie = '%s=%s; Path=/; Max-Age=2592000; SameSite=Lax' % (COOKIE_NAME, token)
-            return self._json({'user': row_to_member(r)}, set_cookie=cookie)
+            return self._json({'user': row_to_member(fresh)}, set_cookie=cookie)
+
 
         if method == 'POST' and path == '/api/logout':
             cookies = self.headers.get('Cookie', '') or ''
@@ -1708,6 +2000,43 @@ class Handler(BaseHTTPRequestHandler):
             cookie = '%s=; Path=/; Max-Age=0' % COOKIE_NAME
             return self._json({'ok': True}, set_cookie=cookie)
 
+        # ---- 忘记密码: 提交重置申请 (公开接口, 无需登录) ----
+        if path == '/api/password-reset-request' and method == 'POST':
+            account = str((body or {}).get('account', '') or '').strip()
+            note = str((body or {}).get('note', '') or '').strip()[:200]
+            ip = self.client_address[0] if self.client_address else ''
+            ua = self.headers.get('User-Agent', '') or ''
+            if not account:
+                conn.close()
+                return self._json({'error': '请输入手机号或姓名', 'code': 'missing'}, 400)
+            # 无论账号是否存在都返回同一句话, 避免被用来枚举系统里的账号
+            generic = {
+                'ok': True,
+                'message': '申请已提交。管理员重置后即可用初始密码登录（手机号后 6 位；'
+                           '未登记手机号的同事为 %s），登录后请立即修改密码。' % DEFAULT_PASSWORD}
+            r = conn.execute(
+                'SELECT * FROM members WHERE (phone=? AND phone<>\'\') OR name=? '
+                'ORDER BY (phone=? AND phone<>\'\') DESC LIMIT 1',
+                (account, account, account)).fetchone()
+            if r and r['active']:
+                ex = conn.execute(
+                    "SELECT id FROM password_reset_requests "
+                    "WHERE member_id=? AND status='pending'", (r['id'],)).fetchone()
+                if ex:
+                    conn.execute('UPDATE password_reset_requests SET note=?, account=?, '
+                                 'created_at=? WHERE id=?',
+                                 (note, account, now_iso(), ex['id']))
+                else:
+                    conn.execute(
+                        'INSERT INTO password_reset_requests '
+                        '(id,member_id,member_name,account,note,status,created_at) '
+                        'VALUES (?,?,?,?,?,?,?)',
+                        (gen_id('prr'), r['id'], r['name'], account, note, 'pending', now_iso()))
+                conn.commit()
+                log_login(conn, r['id'], r['name'], ip, ua, ok=False, reason='reset_requested')
+            conn.close()
+            return self._json(generic)
+
         if method == 'GET' and path == '/api/me':
             user = None
             if uid:
@@ -1715,6 +2044,159 @@ class Handler(BaseHTTPRequestHandler):
                 user = row_to_member(r) if r else None
             conn.close()
             return self._json({'user': user})
+
+        # ---- 修改自己的密码 (需登录) ----
+        if path == '/api/me/password' and method in ('PUT', 'POST'):
+            if not uid:
+                conn.close()
+                return self._error('未登录', 401)
+            old_pwd = str((body or {}).get('oldPassword', '') or '')
+            new_pwd = str((body or {}).get('newPassword', '') or '')
+            r = conn.execute('SELECT * FROM members WHERE id=?', (uid,)).fetchone()
+            if not r:
+                conn.close()
+                return self._error('人员不存在', 404)
+            if not verify_password(old_pwd, _f(r, 'password_hash'), _f(r, 'password_salt')):
+                conn.close()
+                return self._json({'error': '原密码不正确', 'code': 'bad_old'}, 400)
+            err = validate_password(new_pwd)
+            if err:
+                conn.close()
+                return self._json({'error': err, 'code': 'weak'}, 400)
+            if verify_password(new_pwd, _f(r, 'password_hash'), _f(r, 'password_salt')):
+                conn.close()
+                return self._json({'error': '新密码不能与原密码相同', 'code': 'same'}, 400)
+            h, s = hash_password(new_pwd)
+            conn.execute('UPDATE members SET password_hash=?, password_salt=?, '
+                         'pwd_updated_at=?, login_fail_count=0, locked_until=? WHERE id=?',
+                         (h, s, now_iso(), '', uid))
+            conn.commit()
+            conn.close()
+            # 其它设备上的会话全部失效, 当前这台保留
+            killed = drop_sessions_of(uid, keep_token=current_session_token(self))
+            return self._json({'ok': True, 'killedSessions': killed})
+
+        # ---- 修改自己的资料 (手机号 / 头像) ----
+        # 姓名 / 角色 / 工种 保持只读, 只能由管理员在「人员管理」修改
+        if path == '/api/me/profile' and method in ('PUT', 'POST'):
+            if not uid:
+                conn.close()
+                return self._error('未登录', 401)
+            r = conn.execute('SELECT * FROM members WHERE id=?', (uid,)).fetchone()
+            if not r:
+                conn.close()
+                return self._error('人员不存在', 404)
+            b = body or {}
+            phone = str(b.get('phone', r['phone']) or '').strip()
+            avatar = b.get('avatar', r['avatar'])
+            avatar = '' if avatar is None else str(avatar).strip()
+            err = validate_phone(phone)
+            if err:
+                conn.close()
+                return self._json({'error': err, 'code': 'bad_phone'}, 400)
+            err = validate_avatar(avatar)
+            if err:
+                conn.close()
+                return self._json({'error': err, 'code': 'bad_avatar'}, 400)
+            if phone:
+                dup = conn.execute('SELECT name FROM members WHERE phone=? AND id<>?',
+                                   (phone, uid)).fetchone()
+                if dup:
+                    conn.close()
+                    return self._json(
+                        {'error': '该手机号已被「%s」使用' % dup['name'], 'code': 'dup_phone'}, 409)
+            conn.execute('UPDATE members SET phone=?, avatar=? WHERE id=?', (phone, avatar, uid))
+            conn.commit()
+            fresh = conn.execute('SELECT * FROM members WHERE id=?', (uid,)).fetchone()
+            conn.close()
+            return self._json({'ok': True, 'record': row_to_member(fresh)})
+
+        # ---- 我的登录记录 (+ 其它在线设备数) ----
+        if path == '/api/me/logins' and method == 'GET':
+            if not uid:
+                conn.close()
+                return self._error('未登录', 401)
+            logs = list_login_logs(conn, uid, 20)
+            others = count_sessions_of(uid, exclude_token=current_session_token(self))
+            conn.close()
+            return self._json({'logs': logs, 'otherSessions': others})
+
+        # ---- 退出其它设备 (保留当前会话) ----
+        if path == '/api/me/logout-others' and method == 'POST':
+            if not uid:
+                conn.close()
+                return self._error('未登录', 401)
+            conn.close()
+            killed = drop_sessions_of(uid, keep_token=current_session_token(self))
+            return self._json({'ok': True, 'killedSessions': killed})
+
+        # ---- 管理员重置某成员密码 (需管理员) ----
+        m_rp = re.match(r'^/api/members/([\w-]+)/reset-password$', path)
+        if m_rp and method == 'POST':
+            if not self._require_admin(uid):
+                conn.close()
+                return
+            target_id = m_rp.group(1)
+            r = conn.execute('SELECT * FROM members WHERE id=?', (target_id,)).fetchone()
+            if not r:
+                conn.close()
+                return self._error('人员不存在', 404)
+            temp = str((body or {}).get('password') or '').strip() \
+                or initial_password_for(r['phone'])
+            err = validate_password(temp)
+            if err:
+                conn.close()
+                return self._json({'error': err, 'code': 'weak'}, 400)
+            h, s = hash_password(temp)
+            conn.execute('UPDATE members SET password_hash=?, password_salt=?, '
+                         'pwd_updated_at=?, login_fail_count=0, locked_until=? WHERE id=?',
+                         (h, s, now_iso(), '', target_id))
+            # 顺手关掉该成员待处理的「忘记密码」申请, 免得管理员重复处理
+            closed = conn.execute(
+                "UPDATE password_reset_requests SET status='done', handled_at=?, handled_by=? "
+                "WHERE member_id=? AND status='pending'",
+                (now_iso(), uid, target_id)).rowcount
+            conn.commit()
+            conn.close()
+            killed = drop_sessions_of(target_id)   # 强制该成员所有设备下线
+            return self._json({'ok': True, 'password': temp,
+                               'name': r['name'], 'killedSessions': killed,
+                               'closedRequests': closed})
+
+        # ---- 忘记密码申请: 管理员查看列表 ----
+        if path == '/api/password-reset-requests' and method == 'GET':
+            if not self._require_admin(uid):
+                conn.close()
+                return
+            rows = conn.execute(
+                "SELECT * FROM password_reset_requests "
+                "ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC "
+                "LIMIT 100").fetchall()
+            items = [row_to_reset_request(x) for x in rows]
+            conn.close()
+            return self._json({'items': items,
+                               'pending': len([x for x in items if x['status'] == 'pending'])})
+
+        # ---- 忘记密码申请: 管理员标记已处理 / 忽略 ----
+        m_prr = re.match(r'^/api/password-reset-requests/([\w-]+)$', path)
+        if m_prr and method in ('POST', 'PUT'):
+            if not self._require_admin(uid):
+                conn.close()
+                return
+            rid = m_prr.group(1)
+            row = conn.execute('SELECT id FROM password_reset_requests WHERE id=?',
+                               (rid,)).fetchone()
+            if not row:
+                conn.close()
+                return self._error('申请不存在', 404)
+            status = str((body or {}).get('status', 'done') or 'done')
+            if status not in ('done', 'rejected', 'pending'):
+                status = 'done'
+            conn.execute('UPDATE password_reset_requests SET status=?, handled_at=?, '
+                         'handled_by=? WHERE id=?', (status, now_iso(), uid, rid))
+            conn.commit()
+            conn.close()
+            return self._json({'ok': True})
 
         # ---- 以下接口需要登录 ----
         if not uid:
@@ -2036,8 +2518,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             return self._json({'ok': True, 'inserted': {k: len(v) for k, v in inserted.items()}})
 
-        # ---- 备份 / 恢复 / 清空 ----
+        # ---- 备份 / 恢复 / 清空 (仅管理员) ----
         if path == '/api/backup' and method == 'GET':
+            if not self._require_admin(uid):
+                conn.close()
+                return
             with _lock:
                 data = {
                     'members': list_members(conn),
@@ -2053,6 +2538,17 @@ class Handler(BaseHTTPRequestHandler):
                     'roles': list_roles(conn),
                     'work_types': list_work_types(conn),
                     'settings': list_settings(conn),
+                    # 登录凭据(哈希+盐)单独放一段, 让「备份→恢复」不会把所有人密码重置
+                    'credentials': {
+                        r['id']: {
+                            'hash': _f(r, 'password_hash'),
+                            'salt': _f(r, 'password_salt'),
+                            'at': _f(r, 'pwd_updated_at'),
+                        }
+                        for r in conn.execute(
+                            'SELECT id, password_hash, password_salt, pwd_updated_at '
+                            'FROM members').fetchall()
+                    },
                     'exported_at': now_iso(),
                     'version': 'eng_ms_v3_db',
                 }
@@ -2060,13 +2556,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(data)
 
         if path == '/api/restore' and method == 'POST':
+            if not self._require_admin(uid):
+                conn.close()
+                return
+            creds = body.get('credentials') or {}
             with _lock:
                 for t in ('members', 'projects', 'tasks', 'reports',
                           'daily_plans', 'weekly_plans', 'weekly_reports',
                           'purchases', 'approvals', 'departments', 'roles', 'settings', 'work_types'):
                     conn.execute('DELETE FROM ' + t)
                 for rec in body.get('members', []):
-                    upsert_member(conn, rec)
+                    mid = upsert_member(conn, rec)
+                    c = creds.get(mid) or creds.get(rec.get('_id') or '') or {}
+                    if c.get('hash') and c.get('salt'):
+                        conn.execute(
+                            'UPDATE members SET password_hash=?, password_salt=?, pwd_updated_at=? WHERE id=?',
+                            (c['hash'], c['salt'], c.get('at') or now_iso(), mid))
                 for rec in body.get('projects', []):
                     upsert_project(conn, rec)
                 for rec in body.get('tasks', []):
@@ -2094,10 +2599,15 @@ class Handler(BaseHTTPRequestHandler):
                         pass  # 重名/空名 跳过, 保证恢复不中断
                 for k, v in (body.get('settings') or {}).items():
                     upsert_setting(conn, k, v)
+                # 老备份没带 credentials 时, 给恢复出来的人员补初始密码
+                ensure_member_passwords(conn)
             conn.close()
             return self._json({'ok': True})
 
         if path == '/api/reset' and method == 'POST':
+            if not self._require_admin(uid):
+                conn.close()
+                return
             with _lock:
                 for t in ('members', 'projects', 'tasks', 'reports',
                           'daily_plans', 'weekly_plans', 'weekly_reports',
