@@ -296,7 +296,7 @@ function pbDailyDetail(rec) {
   return meta +
     pbBlock('任务安排', '共 ' + (rec.tasks || []).length + ' 项',
       pbTable(['#', '工作内容', '要求', '实施人员', '计划起止'], rows)) +
-    pbBlock('人员安排', '', '<div class="pb-meta-grid">' +
+    pbBlock('人员安排', '', '<div class="pb-meta-grid pb-meta-sub">' +
       pbMeta('夜班', esc(pbNames(crew.night))) +
       pbMeta('休息', esc(pbNames(crew.rest))) +
       pbMeta('调整', esc(pbNames(crew.adjust))) +
@@ -524,33 +524,40 @@ function pbApproveBox(rec, tab) {
   var fieldLabel = isWr ? '补充事项' : '追加工作内容';
   var addLabel = isWr ? '+ 追加到周报' : '+ 追加到计划';
   return '<div class="pb-approve-box">' +
-    '<div class="pb-approve-head">审批操作' +
-      '<span class="sec-meta">' + (n ? '已追加 ' + n + ' 条 · ' : '') +
-      (isWr ? '可先追加补充事项再通过' : '可先追加工作内容再通过') + '</span>' +
+    '<div class="pb-approve-head">' +
+      '<span class="pb-approve-title">审批操作</span>' +
+      '<span class="pb-approve-hint">' + (n ? '已追加 <strong>' + n + '</strong> 条 · ' : '') +
+        (isWr ? '可先补充事项，再决定通过或驳回' : '可先追加工作内容，再决定通过或驳回') + '</span>' +
       '<button class="btn btn-default btn-sm pb-edit-start" type="button">' +
         PB_SVG_EDIT + '<span>修改填报内容</span></button>' +
     '</div>' +
     '<div class="pb-approve-cols">' +
       '<div class="pb-approve-col">' +
-        '<label class="pb-approve-label">' + fieldLabel +
-          ' <span class="pb-approve-opt">工作内容 / 工作要求 / 实施人员 / 完成时间 均必填</span></label>' +
+        '<div class="pb-approve-col-head">' +
+          '<span class="pb-approve-col-title">' + fieldLabel + '</span>' +
+          '<span class="pb-approve-badge">可选</span>' +
+          '<span class="pb-approve-opt">工作内容 / 工作要求 / 实施人员 / 完成时间 均必填</span>' +
+        '</div>' +
         appendTaskFormHtml() +
         '<div class="pb-approve-row">' +
           '<button class="btn btn-default pb-append" type="button">' + addLabel + '</button>' +
         '</div>' +
       '</div>' +
-      '<div class="pb-approve-col">' +
-        '<label class="pb-approve-label" for="pbRejectInput">驳回原因 <span class="pb-approve-opt">驳回时必填</span></label>' +
-        '<textarea class="textarea pb-reject-input" id="pbRejectInput" rows="2" ' +
-          'placeholder="请说明驳回原因，填报人可据此修改后重新提交"></textarea>' +
+      '<div class="pb-approve-col pb-approve-col-rj">' +
+        '<div class="pb-approve-col-head">' +
+          '<span class="pb-approve-col-title">驳回</span>' +
+          '<span class="pb-approve-badge pb-approve-badge-warn">退回时填写</span>' +
+        '</div>' +
+        '<textarea class="textarea pb-reject-input" id="pbRejectInput" rows="5" ' +
+          'placeholder="说明需要修改的地方，填报人可据此修改后重新提交"></textarea>' +
         '<div class="pb-approve-row">' +
-          '<button class="btn btn-danger pb-approve-rj" type="button">驳回</button>' +
+          '<button class="btn btn-danger-outline pb-approve-rj" type="button">驳回</button>' +
         '</div>' +
       '</div>' +
     '</div>' +
     '<div class="pb-approve-final">' +
+      '<span class="pb-approve-final-text">确认内容无误后通过审批 —— 通过后记录锁定，只能查看，不可修改</span>' +
       '<button class="btn btn-success pb-approve-ok" type="button">✓ 通过审批</button>' +
-      '<span class="pb-approve-tip">通过后记录锁定，只能查看，不可修改</span>' +
     '</div>' +
   '</div>';
 }
@@ -578,6 +585,11 @@ function pbRenderView(ov, rec, tab, opts) {
   function paint() {
     view.hidden = false;
     view.innerHTML = pbDetailHtml(rec, tab) + pbApproveBox(rec, tab);
+    /* 审批操作区提到明细之上 —— 审批管理页的主操作必须首屏可见
+     * 最终顺序: 关键信息卡 → 审批操作 → 任务明细 / 人员 / 备注 */
+    var ab = view.querySelector('.pb-approve-box');
+    var mg = view.querySelector('.pb-meta-grid');
+    if (ab && mg && mg.parentNode === view) view.insertBefore(ab, mg.nextSibling);
     bindPeoplePickers(view);       /* 追加表单里的人员选择器 */
     bindEditEntry();
     bindApproveActions();
@@ -722,7 +734,15 @@ function pbOpenDetail(rec, tab, opts) {
   ov.innerHTML =
     '<div class="modal modal-large" role="dialog" aria-modal="true">' +
       '<div class="modal-header">' +
-        '<span>' + esc(pbTitle(rec, tab)) + '</span>' +
+        '<div class="pb-head-main">' +
+          '<div class="pb-head-title">' + esc(pbTitle(rec, tab)) + '</div>' +
+          '<div class="pb-head-sub">' +
+            '<span class="chip">' + esc(PB_TAB_LABEL[tab] || tab) + '</span>' +
+            pbRowTag(rec, tab) +
+            (pbSubmitter(rec) ? '<span class="pb-head-sep">·</span><span>提交人 ' + esc(pbSubmitter(rec)) + '</span>' : '') +
+            (pbSubmittedAt(rec) ? '<span class="pb-head-sep">·</span><span>' + esc(pbSubmittedAt(rec)) + '</span>' : '') +
+          '</div>' +
+        '</div>' +
         '<span class="pb-head-actions">' +
           (full ? '<a class="btn-secondary btn-sm" href="' + esc(full) + '">打开填报页</a>' : '') +
           '<button class="modal-close" type="button" aria-label="关闭">' + PB_SVG_CLOSE + '</button>' +

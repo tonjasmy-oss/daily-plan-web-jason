@@ -678,6 +678,16 @@ body.login-page {
   background: var(--bg-card-hover); border-color: var(--border-light);
 }
 
+/* .btn-default 此前一直没定义 —— 会掉到浏览器原生的浅灰 buttonface,
+ * 在深色主题里非常刺眼。这里统一成与 .btn-secondary 一致的"次级按钮"外观。*/
+.btn-default {
+  background: var(--bg-elevated); color: var(--text);
+  border-color: var(--border);
+}
+.btn-default:hover:not(:disabled) {
+  background: var(--bg-card-hover); border-color: var(--border-light);
+}
+
 .btn-success {
   background: var(--success); color: var(--text-inverse);
 }
@@ -3270,6 +3280,9 @@ table.data-table {
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-elevated);
 }
+/* ⚠ 必须显式关掉: 上面的 display:grid 优先级高于浏览器默认的 [hidden]{display:none},
+ *   否则「+ 选择人员」折叠面板会一直展开、按钮文案也跟着失灵 */
+.pp-panel[hidden] { display: none; }
 .pp-row {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer;
@@ -3331,5 +3344,144 @@ table.data-table {
   .appt-form, .edt-form, .edt-task-body, .edt-crew { grid-template-columns: 1fr; }
   .pp-panel { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+ * 详情弹层 版式优化 (W9)
+ *   审批管理 / 报表浏览 共用 pbOpenDetail —— 本次改动两个页面同时受益
+ *   三件事: ① 窗口加宽让 5 列任务表舒展 ② 关键字段做成信息卡, 分层清晰
+ *           ③ 审批操作区提到明细之上并重排, 主操作首屏可见
+ * ============================================================ */
+/* ① 弹层加宽 */
+.pb-overlay .modal { max-width: 960px; }
+.pb-overlay .modal-body { padding: 18px 22px 22px; }
+.pb-overlay .modal-header { align-items: flex-start; gap: 14px; padding: 16px 22px 14px; }
+.pb-overlay .modal-footer { padding: 12px 22px; }
+
+/* 标题 + 关键信息副行 (状态 / 类型 / 提交人 / 提交时间) */
+.pb-head-main { flex: 1 1 auto; min-width: 0; }
+.pb-head-title {
+  font-size: 17px; font-weight: 700; line-height: 1.35;
+  color: var(--text); word-break: break-word;
+}
+.pb-head-sub {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 7px;
+  font-size: 12px; font-weight: 400; color: var(--text-muted);
+}
+.pb-head-sub .chip { font-size: 11px; padding: 1px 9px; }
+.pb-head-sub .report-status-tag { font-size: 11px; }
+.pb-head-sep { color: var(--border-light); }
+
+/* ② 关键字段 = 信息卡 (label 在上, 值在下; 自动换列) */
+.pb-view > .pb-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 14px 22px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+.pb-meta-grid > .pb-meta-item { display: block; min-width: 0; }
+.pb-meta-grid > .pb-meta-item > .pb-meta-label {
+  display: block; margin-bottom: 4px;
+  font-size: 11px; letter-spacing: 0.03em; color: var(--text-muted);
+}
+.pb-meta-grid > .pb-meta-item > .pb-meta-value {
+  display: block; font-size: 13px; line-height: 1.5;
+  color: var(--text); word-break: break-word;
+}
+/* 嵌套信息卡 (如「人员安排」) 用虚线弱化, 避免与外层卡片抢视线 */
+.pb-meta-grid.pb-meta-sub {
+  gap: 12px 20px; padding: 12px 14px;
+  border-style: dashed; background: rgba(127, 127, 127, 0.05);
+}
+
+/* 分块标题加左侧色条, 一眼分得清几个段落 */
+.pb-block { margin-bottom: 18px; }
+.pb-block > h3 {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 0 0 10px; padding-left: 10px;
+  border-left: 3px solid var(--primary);
+  font-size: 14px; font-weight: 600; line-height: 1.2; color: var(--text);
+}
+.pb-block > h3 .sec-meta { font-size: 12px; font-weight: 400; color: var(--text-muted); }
+
+/* ③ 审批操作区 */
+.pb-approve-box {
+  margin: 0 0 18px; padding: 16px 18px;
+  border: 1px solid rgba(88, 101, 242, 0.35);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(88, 101, 242, 0.09), rgba(88, 101, 242, 0.02));
+}
+.pb-approve-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 12px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--divider);
+}
+.pb-approve-title {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 15px; font-weight: 700; color: var(--text);
+}
+.pb-approve-hint { font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.pb-approve-hint strong { color: var(--primary-light); font-weight: 700; }
+
+.pb-approve-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  gap: 14px; align-items: stretch;
+}
+.pb-approve-col {
+  display: flex; flex-direction: column;
+  padding: 14px; border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.pb-approve-col-rj { border-color: rgba(237, 66, 69, 0.3); }
+.pb-approve-col-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.pb-approve-col-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.pb-approve-badge {
+  padding: 1px 8px; border-radius: var(--radius-pill);
+  background: var(--primary-bg); color: var(--primary-light);
+  font-size: 11px; font-weight: 600;
+}
+.pb-approve-badge-warn { background: var(--danger-bg); color: var(--danger); }
+.pb-approve-opt { flex: 1 1 100%; font-size: 11.5px; font-weight: 400; color: var(--text-muted); }
+/* 审批列比整页窄, 四件套单列铺满更清爽; 人员面板也收成一列 */
+.pb-approve-col .appt-form { grid-template-columns: 1fr; }
+.pb-approve-col .pp-panel { grid-template-columns: 1fr; }
+.pb-approve-col .pb-approve-row { margin-top: auto; padding-top: 12px; }
+.pb-approve-col .pb-approve-row .btn { width: 100%; justify-content: center; }
+.pb-approve-box .textarea { min-height: 44px; }
+/* 驳回输入框撑满所在列, 让右栏按钮与左栏按钮底部对齐 */
+.pb-approve-col-rj .pb-reject-input { flex: 1 1 auto; min-height: 110px; }
+
+.pb-approve-final {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--divider);
+}
+.pb-approve-final-text { font-size: 13px; color: var(--text-secondary); }
+.pb-approve-final .btn { min-width: 168px; justify-content: center; }
+.pb-approve-ok { font-weight: 700; letter-spacing: 0.02em; }
+
+@media (max-width: 860px) {
+  .pb-approve-cols { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .pb-overlay .modal { max-width: 100%; }
+  .pb-overlay .modal-header { padding: 14px 16px 12px; }
+  .pb-overlay .modal-body { padding: 14px 16px 16px; }
+  .pb-overlay .modal-footer { padding: 12px 16px; }
+  .pb-view > .pb-meta-grid { grid-template-columns: 1fr 1fr; gap: 12px 14px; padding: 12px; }
+  .pb-approve-final { flex-direction: column; align-items: stretch; }
+  .pb-approve-final .btn { width: 100%; }
+}
+
 
 

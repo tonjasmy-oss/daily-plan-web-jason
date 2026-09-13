@@ -47,7 +47,8 @@ async function initApprovalPage() {
 
   var tab = queryParam('tab') || 'form';
   if (tab !== 'user' && tab !== 'form') tab = 'form';
-  var status = queryParam('status') || 'pending';
+  /* 默认「全部状态」—— 待审批置顶, 已通过/已驳回也在同一列表里可查 */
+  var status = queryParam('status') || 'all';
   var kw = queryParam('q') || '';
 
   renderPage({
