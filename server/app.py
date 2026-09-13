@@ -197,6 +197,14 @@ CREATE TABLE IF NOT EXISTS purchases (
   rejected_at TEXT DEFAULT '',
   rejected_reason TEXT DEFAULT '',
   reviewed_by TEXT DEFAULT '',
+  merge_id TEXT DEFAULT '',
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS purchase_groups (
+  id TEXT PRIMARY KEY,
+  name TEXT DEFAULT '',
+  created_by TEXT DEFAULT '',
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
@@ -470,6 +478,7 @@ def migrate_db():
                 ('rejected_at', "TEXT DEFAULT ''"),
                 ('rejected_reason', "TEXT DEFAULT ''"),
                 ('reviewed_by', "TEXT DEFAULT ''"),
+                ('merge_id', "TEXT DEFAULT ''"),
             ],
         }
         for table, cols in new_cols.items():
@@ -878,15 +887,16 @@ def upsert_purchase(conn, data):
               data.get('approved_at', ''),
               data.get('rejected_at', ''),
               data.get('rejected_reason', ''),
-              data.get('reviewed_by', ''))
+              data.get('reviewed_by', ''),
+              data.get('merge_id', ''))
     old = conn.execute('SELECT id FROM purchases WHERE id=?', (pid,)).fetchone()
     if old:
         conn.execute(
-            'UPDATE purchases SET date=?,name=?,spec=?,unit=?,qty=?,total=?,items_json=?,project_id=?,reason=?,status=?,applicant=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,updated_at=? WHERE id=?',
+            'UPDATE purchases SET date=?,name=?,spec=?,unit=?,qty=?,total=?,items_json=?,project_id=?,reason=?,status=?,applicant=?,approver=?,approved_at=?,rejected_at=?,rejected_reason=?,reviewed_by=?,merge_id=?,updated_at=? WHERE id=?',
             fields + (now, pid))
     else:
         conn.execute(
-            'INSERT INTO purchases (id,date,name,spec,unit,qty,total,items_json,project_id,reason,status,applicant,approver,approved_at,rejected_at,rejected_reason,reviewed_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO purchases (id,date,name,spec,unit,qty,total,items_json,project_id,reason,status,applicant,approver,approved_at,rejected_at,rejected_reason,reviewed_by,merge_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (pid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return pid
@@ -913,6 +923,37 @@ def upsert_approval(conn, data):
             (aid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return aid
+
+
+# ---- purchase_groups (物资申购合并批次) ----
+def row_to_purchase_group(r):
+    return {
+        '_id': r['id'], 'name': r['name'],
+        'created_by': r['created_by'],
+        'created_at': r['created_at'], 'updated_at': r['updated_at'],
+    }
+
+
+def upsert_purchase_group(conn, data):
+    gid = data.get('_id') or gen_id('pg')
+    now = now_iso()
+    fields = (data.get('name', ''), data.get('created_by', ''))
+    old = conn.execute('SELECT id FROM purchase_groups WHERE id=?', (gid,)).fetchone()
+    if old:
+        conn.execute(
+            'UPDATE purchase_groups SET name=?,created_by=?,updated_at=? WHERE id=?',
+            fields + (now, gid))
+    else:
+        conn.execute(
+            'INSERT INTO purchase_groups (id,name,created_by,created_at,updated_at) VALUES (?,?,?,?,?)',
+            (gid,) + fields + (data.get('created_at') or now, now))
+    conn.commit()
+    return gid
+
+
+def list_purchase_groups(conn):
+    return [row_to_purchase_group(r) for r in
+            conn.execute('SELECT * FROM purchase_groups ORDER BY created_at DESC').fetchall()]
 
 
 # ---- departments ----
@@ -1456,6 +1497,7 @@ class Handler(BaseHTTPRequestHandler):
                     'weekly_plans': list_weekly_plans(conn),
                     'weekly_reports': list_weekly_reports(conn),
                     'purchases': list_purchases(conn),
+                    'purchase_groups': list_purchase_groups(conn),
                     'approvals': list_approvals(conn),
                     'departments': list_departments(conn),
                     'roles': list_roles(conn),
@@ -1637,6 +1679,7 @@ class Handler(BaseHTTPRequestHandler):
             '/api/weekly-reports':('weekly_reports',row_to_weekly_report,upsert_weekly_report,list_weekly_reports,'wr'),
             '/api/purchases':     ('purchases',     row_to_purchase,     upsert_purchase,     list_purchases,     'pu'),
             '/api/approvals':     ('approvals',     row_to_approval,     upsert_approval,     list_approvals,     'ap'),
+            '/api/purchase-groups': ('purchase_groups', row_to_purchase_group, upsert_purchase_group, list_purchase_groups, 'pg'),
             '/api/departments':   ('departments',   row_to_department,   upsert_department,   list_departments,   'd'),
             '/api/roles':         ('roles',         row_to_role,         upsert_role,         list_roles,         'r'),
         }

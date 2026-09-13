@@ -15,6 +15,7 @@ var DB = {
   members: [], projects: [], tasks: [], reports: [],
   dailyPlans: [], weeklyPlans: [], weeklyReports: [],
   purchases: [], approvals: [], departments: [], roles: [],
+  purchaseGroups: [],
   settings: {},
   loaded: false, _loading: null
 };
@@ -214,6 +215,7 @@ function bootstrapDB() {
       DB.weeklyPlans = res.weekly_plans || [];
       DB.weeklyReports = res.weekly_reports || [];
       DB.purchases = res.purchases || [];
+      DB.purchaseGroups = res.purchase_groups || [];
       DB.approvals = res.approvals || [];
       DB.departments = res.departments || [];
       DB.roles = res.roles || [];
@@ -584,6 +586,30 @@ function updateApproval(id, patch) {
 function deleteApproval(id) {
   DB.approvals = DB.approvals.filter(function (r) { return r._id !== id; });
   _syncNow('DELETE', '/api/approvals/' + id);
+}
+
+/* ===== 物资申购合并批次 CRUD (仅管理端使用) ===== */
+function loadPurchaseGroups() { return DB.purchaseGroups; }
+function createPurchaseGroup(data) {
+  var rec = Object.assign({
+    _id: 'pg_' + uuid(),
+    name: '', created_by: '',
+    created_at: new Date().toISOString()
+  }, data);
+  DB.purchaseGroups.unshift(rec);
+  _syncNow('POST', '/api/purchase-groups', rec);
+  return rec;
+}
+function updatePurchaseGroup(id, patch) {
+  var idx = _findIdx(DB.purchaseGroups, id);
+  if (idx < 0) return null;
+  DB.purchaseGroups[idx] = Object.assign({}, DB.purchaseGroups[idx], patch, { updated_at: new Date().toISOString() });
+  _syncRecord('PUT', '/api/purchase-groups/' + id, DB.purchaseGroups[idx]);
+  return DB.purchaseGroups[idx];
+}
+function deletePurchaseGroup(id) {
+  DB.purchaseGroups = DB.purchaseGroups.filter(function (r) { return r._id !== id; });
+  _syncNow('DELETE', '/api/purchase-groups/' + id);
 }
 
 /* ===== 部门管理 CRUD ===== */
