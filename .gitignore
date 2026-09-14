@@ -48,3 +48,14 @@ _login_test.js
 
 # 日志
 *.log
+
+# 一次性调试截图 / 巡检产物 (不入仓)
+purchase-*.png
+daily-*.png
+member-*.png
+
+# 从云端拉回来的 data.db 快照 (不入仓, 仅供本地对比)
+server/data.db.remote-snapshot-*
+
+# sync_engms.py 重置 sessions.json 之前的备份 (不入仓)
+server/sessions.json.pre-sync-*
