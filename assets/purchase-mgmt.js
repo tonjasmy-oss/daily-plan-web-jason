@@ -144,7 +144,7 @@ async function initPurchaseMgmtPage() {
           (g.created_at ? ' · ' + esc(g.created_at.slice(0, 16).replace('T', ' ')) : '') + '</div>' +
           '</div>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
-          '<button class="btn-success btn-sm" data-act="exp" data-id="' + esc(g._id) + '">导出 Excel</button>' +
+          '<button class="btn-success btn-sm" data-act="exp" data-id="' + esc(g._id) + '" data-perm="p_export">导出 Excel</button>' +
           '<button class="btn-ghost btn-sm" data-act="ren" data-id="' + esc(g._id) + '">重命名</button>' +
           '<a class="btn-ghost btn-sm" href="purchase-detail.html?group=' + encodeURIComponent(g._id) + '">查看明细</a>' +
           '<button class="btn-danger btn-sm" data-act="unmerge" data-id="' + esc(g._id) + '">解除合并</button>' +
@@ -354,8 +354,8 @@ async function initPurchaseMgmtPage() {
           : '';
         var actions = '<a class="btn-ghost btn-sm" href="purchase-detail.html?id=' + encodeURIComponent(r._id) + '">查看明细</a>' +
           (r.status === 'submitted'
-            ? '<button class="btn-success btn-sm" data-ok="' + esc(r._id) + '">通过</button>' +
-              '<button class="btn-danger btn-sm" data-rj="' + esc(r._id) + '">驳回</button>'
+            ? '<button class="btn-success btn-sm" data-ok="' + esc(r._id) + '" data-perm="p_approve">通过</button>' +
+              '<button class="btn-danger btn-sm" data-rj="' + esc(r._id) + '" data-perm="p_approve">驳回</button>'
             : '');
         return '<div class="list-row" style="align-items:flex-start;' + (r.merge_id ? 'border-left:3px solid ' + MERGE_COLOR + ';background:rgba(139,92,246,.04)' : '') + '">' +
           '<label style="display:flex;align-items:center;flex-shrink:0;margin-right:2px;cursor:pointer">' +

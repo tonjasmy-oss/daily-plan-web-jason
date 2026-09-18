@@ -3,6 +3,9 @@
  * 标题可勾选: 日常维修每日完成情况 / 计划工作每日完成情况
  * 任务字段: 工作内容 / 实施人员(多选 chip) / 完成时间 / 完成·未完成 + 未完成原因
  * 状态机: draft → submitted → signed / rejected
+ * 两种签名(互不影响):
+ *   填报人签名 fill_signature  由填报人本人签(p_sign), 不改变 status
+ *   审批签名   signature       审批人批准时签(p_approve), 同时置 status=signed
  * ============================================================ */
 
 /* 可作为「实施人员」被选择的角色 (对应 roles 表 key, admin 不参与施工排班)
@@ -60,6 +63,9 @@ async function initReportPage() {
       approver: '',
       rejected_reason: '',
       signatureImg: '',
+      /* 填报人签名(个人填报签名): 与审批签名 signatureImg 分开存放, 不改变 status */
+      fillSignatureImg: '',
+      fill_signed_at: '',
       submitted_at: '',
       signed_at: '',
       rejected_at: ''
@@ -124,6 +130,8 @@ async function initReportPage() {
           approver: r.approver || '',
           rejected_reason: r.rejected_reason || '',
           signatureImg: r.signature || '',
+          fillSignatureImg: r.fill_signature || '',
+          fill_signed_at: r.fill_signed_at || '',
           submitted_at: r.submitted_at || '',
           signed_at: r.signed_at || '',
           rejected_at: r.rejected_at || '',
@@ -214,6 +222,8 @@ async function initReportPage() {
       approver: form.approver,
       rejected_reason: form.rejected_reason,
       signature: form.signatureImg,
+      fill_signature: form.fillSignatureImg,
+      fill_signed_at: form.fill_signed_at,
       tasks: form.tasks.filter(function (t) { return t.content && t.content.trim(); })
         .map(function (t) {
           return Object.assign({}, t, {
@@ -235,6 +245,7 @@ async function initReportPage() {
         isEdit = true;
         form.submitted_at = res.record.submitted_at || form.submitted_at;
         form.signed_at = res.record.signed_at || form.signed_at;
+        form.fill_signed_at = res.record.fill_signed_at || form.fill_signed_at;
         form.rejected_at = res.record.rejected_at || form.rejected_at;
       }
       if (afterSuccess) { afterSuccess(); return; }
@@ -278,7 +289,9 @@ async function initReportPage() {
 
   function signForm() {
     if (!form.approver) { toast('请先填写审批人', 'error'); return; }
-    confirmDialog('确认签名', '签名后将表示审批通过，是否继续？', function () {
+    confirmDialog('确认审批通过',
+      '签名后表示审批通过，记录将锁定；此处是审批签名，与填报人签名不同。是否继续？',
+      function () {
       openSignaturePad({
         onConfirm: function (dataURL) {
           form.signatureImg = dataURL;
@@ -359,20 +372,38 @@ async function initReportPage() {
       }
     }
 
-    /* 签名 */
-    var signatureSection = '';
-    if (st === 'submitted' && !form.signatureImg) {
-      signatureSection =
+    /* 填报人签名 (个人填报签名: 由填报人本人签, 表示内容属实, 不改变审批状态) */
+    var fillSignSection = '';
+    if (form.fillSignatureImg) {
+      fillSignSection =
         '<div class="detail-section">' +
-          '<h3>签名</h3>' +
-          '<button class="btn btn-primary" id="btnOpenSign">✍ 点击签名</button>' +
+          '<h3>填报人签名' +
+            (form.fill_signed_at ? '<span class="sec-meta">' + esc(formatDateTime(form.fill_signed_at)) + '</span>' : '') +
+          '</h3>' +
+          '<img class="signature-image" src="' + form.fillSignatureImg + '" alt="填报人签名">' +
+          (st === 'signed'
+            ? ''
+            : '<div class="report-actions" style="margin-top:8px">' +
+                '<button class="btn btn-default" id="btnFillSign" data-perm="p_sign">重新签名</button>' +
+              '</div>') +
+        '</div>';
+    } else if (st !== 'signed') {
+      fillSignSection =
+        '<div class="detail-section">' +
+          '<h3>填报人签名<span class="sec-meta">填报人本人签名, 表示填报内容属实</span></h3>' +
+          '<button class="btn btn-primary" id="btnFillSign" data-perm="p_sign">✍ 填报人签名</button>' +
         '</div>';
     }
+
+    /* 审批签名 (审批人批准通过时签名, 由 p_approve 控制) */
+    var approveSignSection = '';
     if (form.signatureImg) {
-      signatureSection =
+      approveSignSection =
         '<div class="detail-section">' +
-          '<h3>签名</h3>' +
-          '<img class="signature-image" src="' + form.signatureImg + '" alt="签名">' +
+          '<h3>审批签名' +
+            (form.signed_at ? '<span class="sec-meta">' + esc(formatDateTime(form.signed_at)) + '</span>' : '') +
+          '</h3>' +
+          '<img class="signature-image" src="' + form.signatureImg + '" alt="审批签名">' +
         '</div>';
     }
 
@@ -380,15 +411,15 @@ async function initReportPage() {
     var actionButtons = '';
     if (st === 'draft') {
       actionButtons =
-        '<button class="btn btn-primary btn-lg" id="btnSubmit">提交</button>' +
-        (isEdit ? '<button class="btn btn-default btn-lg" id="btnSaveDraft">保存草稿</button>' : '');
+        '<button class="btn btn-primary btn-lg" id="btnSubmit" data-perm="p_create">提交</button>' +
+        (isEdit ? '<button class="btn btn-default btn-lg" id="btnSaveDraft" data-perm="p_create">保存草稿</button>' : '');
     } else if (st === 'submitted') {
       actionButtons =
-        '<button class="btn btn-success btn-lg" id="btnSign">✓ 批准签名</button>' +
-        '<button class="btn btn-danger btn-lg" id="btnReject">驳回</button>';
+        '<button class="btn btn-success btn-lg" id="btnSign" data-perm="p_approve">✓ 审批通过并签名</button>' +
+        '<button class="btn btn-danger btn-lg" id="btnReject" data-perm="p_approve">驳回</button>';
     } else if (st === 'rejected') {
       actionButtons =
-        '<button class="btn btn-primary btn-lg" id="btnResubmit">重新提交</button>';
+        '<button class="btn btn-primary btn-lg" id="btnResubmit" data-perm="p_create">重新提交</button>';
     }
 
     content.innerHTML =
@@ -398,7 +429,7 @@ async function initReportPage() {
           '<span class="report-status-tag report-status-' + esc(st) + '">' + (REPORT_STATUS_TEXT[st] || st) + '</span>' +
         '</h2>' +
         '<div class="page-actions">' +
-          '<button class="btn btn-default" id="btnExportExcel">导出 Excel</button>' +
+          '<button class="btn btn-default" id="btnExportExcel" data-perm="p_export">导出 Excel</button>' +
         '</div>' +
       '</div>' +
 
@@ -419,7 +450,7 @@ async function initReportPage() {
 
       '<div class="section rp-section">' +
         '<div class="section-header-row"><h3 style="margin:0;">工作内容 <span class="sec-meta">每条任务填写工作内容 / 实施人员 / 完成时间 / 完成状态</span></h3>' +
-          (editable ? '<button class="btn-link" id="btnAddTask">+ 添加任务</button>' : '') +
+          (editable ? '<button class="btn-link" id="btnAddTask" data-perm="p_create">+ 添加任务</button>' : '') +
         '</div>' +
         '<div class="rp-task-list" id="rpTaskList">' + tasksHtml + '</div>' +
       '</div>' +
@@ -430,10 +461,11 @@ async function initReportPage() {
       '</div>' +
 
       approverSection +
-      signatureSection +
+      fillSignSection +
+      approveSignSection +
       (actionButtons ? '<div class="report-actions">' + actionButtons + '</div>' : '') +
       (isEdit && st === 'draft' ?
-        '<div class="report-actions"><button class="btn btn-danger-outline btn-lg" id="btnDelete">删除记录</button></div>' : '');
+        '<div class="report-actions"><button class="btn btn-danger-outline btn-lg" id="btnDelete" data-perm="p_delete">删除记录</button></div>' : '');
 
     bindEvents();
   }
@@ -664,17 +696,29 @@ async function initReportPage() {
     var btnDelete = document.getElementById('btnDelete');
     if (btnDelete) btnDelete.onclick = deleteRecord;
 
-    var btnOpenSign = document.getElementById('btnOpenSign');
-    if (btnOpenSign) btnOpenSign.onclick = function () {
-      if (!form.approver) { toast('请先填写审批人', 'error'); return; }
-      openSignaturePad({
-        onConfirm: function (dataURL) {
-          form.signatureImg = dataURL;
-          toast('签名已记录');
-          form.status = 'signed';
-          saveForm(null, true);
-        }
-      });
+    var btnFillSign = document.getElementById('btnFillSign');
+    if (btnFillSign) btnFillSign.onclick = function () {
+      confirmDialog('填报人签名',
+        '签名表示本表由本人填报并确认内容属实（不代表审批通过），是否继续？',
+        function () {
+          openSignaturePad({
+            onConfirm: function (dataURL) {
+              form.fillSignatureImg = dataURL;
+              /* 个人填报签名不改变审批状态, 仅保存签名图片 */
+              saveForm(null, false, function () {
+                if (!form.fill_signed_at) {
+                  /* 后端未识别 fill_signature(通常是服务未重启), 回退界面避免误以为已签名 */
+                  form.fillSignatureImg = '';
+                  toast('签名未保存: 后端服务尚未加载新字段, 请重启服务后重试', 'error');
+                  render();
+                  return;
+                }
+                toast('填报人签名已记录', 'success');
+                render();
+              });
+            }
+          });
+        });
     };
 
     var btnExport = document.getElementById('btnExportExcel');
@@ -685,6 +729,8 @@ async function initReportPage() {
         categories: form.categories,
         approver: form.approver, rejected_reason: form.rejected_reason,
         signature: form.signatureImg,
+      fill_signature: form.fillSignatureImg,
+      fill_signed_at: form.fill_signed_at,
         tasks: form.tasks.filter(function (t) { return t.content && t.content.trim(); })
           .map(function (t) {
             return Object.assign({}, t, {

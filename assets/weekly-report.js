@@ -69,7 +69,7 @@ async function initWeeklyReportPage() {
       '<div class="field-row" style="margin-top:14px"><label class="field-label"><span class="required">*</span>本周工作摘要</label>' +
       '<textarea class="input" id="wrSummary" rows="3" placeholder="例如:完成 3# 楼主体结构验收, 下周进入砌体施工"></textarea></div>' +
       '<div class="report-actions" style="justify-content:flex-start;margin-top:14px">' +
-      '<button class="btn btn-primary btn-lg" id="wrSubmit">提交周报</button></div>' +
+      '<button class="btn btn-primary btn-lg" id="wrSubmit" data-perm="p_create">提交周报</button></div>' +
       '</div>' +
       '<div class="section"><h3>周报列表 <span class="sec-meta">按时间倒序, 仅作留档</span></h3><div id="wrList"></div></div>'
   });

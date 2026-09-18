@@ -32,28 +32,43 @@ var ICONS = {
   about:     '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8h.01M11 12h1v5h1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 };
 
+/* mod 字段 = 模块访问控制 id, 必须与各页面 requireModule('m_xxx') 的实参严格一致。
+ * 「用户角色」编辑弹窗里的「可访问模块」勾选项, 就由这张表派生 (见下方 MODULES_LIST)。
+ * roles 字段是历史遗留的角色白名单, 保留用于向前兼容; 新逻辑以角色的 modules 数组为准。 */
 var NAV_ITEMS = [
-  { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard',  href: 'dashboard.html',  roles: null,                  group: '工作台' },
-  { id: 'daily-plan', label: '日计划填报', icon: 'dailyPlan',  href: 'daily-plan.html', roles: null,                  group: '填报' },
-  { id: 'weekly-plan',label: '周计划填报', icon: 'weeklyPlan', href: 'weekly-plan.html',roles: null,                  group: '填报' },
-  { id: 'report',     label: '日报表填报', icon: 'report',     href: 'report.html',     roles: null,                  group: '填报' },
-  { id: 'weekly-rpt', label: '计划周报',   icon: 'weeklyRpt',  href: 'weekly-report.html', roles: null,                group: '填报' },
-  { id: 'browse',     label: '报表浏览',   icon: 'browse',     href: 'plan-browse.html',roles: null,                  group: '填报' },
-  { id: 'purchase',   label: '物资申购',   icon: 'purchase',   href: 'purchase.html',   roles: null,                  group: '填报' },
-  { id: 'reports',    label: '历史记录',   icon: 'reports',    href: 'reports.html',    roles: null,                  group: '管理' },
-  { id: 'approval',   label: '审批管理',   icon: 'approval',   href: 'approval.html',   roles: ['admin','manager'],   group: '管理' },
-  { id: 'purchase-mgmt', label: '物资管理', icon: 'purchase',  href: 'purchase-mgmt.html', roles: ['admin','manager'],group: '管理' },
-  { id: 'analysis',   label: '分析空间',   icon: 'browse',     href: 'analysis.html',   roles: ['admin','manager'],   group: '管理' },
-  { id: 'tasks',      label: '任务看板',   icon: 'tasks',      href: 'tasks.html',      roles: null,                  group: '管理' },
-  { id: 'projects',   label: '项目管理',   icon: 'projects',   href: 'projects.html',   roles: null,                  group: '管理' },
-  { id: 'members',    label: '人员管理',   icon: 'members',    href: 'members.html',    roles: ['admin','manager'],   group: '系统设置' },
-  { id: 'departments',label: '部门管理',   icon: 'dept',       href: 'departments.html',roles: ['admin'],             group: '系统设置' },
-  { id: 'roles',      label: '用户角色',   icon: 'role',       href: 'roles.html',      roles: ['admin'],             group: '系统设置' },
-  { id: 'settings',   label: '系统参数',   icon: 'settings',   href: 'settings.html',   roles: ['admin'],             group: '系统设置' },
-  { id: 'files',      label: '附件管理',   icon: 'files',      href: 'settings-files.html', roles: ['admin'],         group: '系统设置' },
-  { id: 'about',      label: '关于我们',   icon: 'about',      href: 'about.html',      roles: null,                  group: '系统设置' },
-  { id: 'me',         label: '个人中心',   icon: 'me',         href: 'me.html',         roles: null,                  group: '系统设置' }
+  { id: 'dashboard',  label: '仪表盘',     icon: 'dashboard',  href: 'dashboard.html',  roles: null,                  group: '工作台',   mod: 'm_dashboard' },
+  { id: 'daily-plan', label: '日计划填报', icon: 'dailyPlan',  href: 'daily-plan.html', roles: null,                  group: '填报',     mod: 'm_daily_plan' },
+  { id: 'weekly-plan',label: '周计划填报', icon: 'weeklyPlan', href: 'weekly-plan.html',roles: null,                  group: '填报',     mod: 'm_weekly_plan' },
+  { id: 'report',     label: '日报表填报', icon: 'report',     href: 'report.html',     roles: null,                  group: '填报',     mod: 'm_report' },
+  { id: 'weekly-rpt', label: '计划周报',   icon: 'weeklyRpt',  href: 'weekly-report.html', roles: null,                group: '填报',     mod: 'm_weekly_rpt' },
+  { id: 'browse',     label: '报表浏览',   icon: 'browse',     href: 'plan-browse.html',roles: null,                  group: '填报',     mod: 'm_browse' },
+  { id: 'purchase',   label: '物资申购',   icon: 'purchase',   href: 'purchase.html',   roles: null,                  group: '填报',     mod: 'm_purchase' },
+  { id: 'reports',    label: '历史记录',   icon: 'reports',    href: 'reports.html',    roles: null,                  group: '管理',     mod: 'm_reports' },
+  { id: 'approval',   label: '审批管理',   icon: 'approval',   href: 'approval.html',   roles: ['admin','manager'],   group: '管理',     mod: 'm_approval' },
+  { id: 'purchase-mgmt', label: '物资管理', icon: 'purchase',  href: 'purchase-mgmt.html', roles: ['admin','manager'],group: '管理',     mod: 'm_purchase_mgmt' },
+  { id: 'analysis',   label: '分析空间',   icon: 'browse',     href: 'analysis.html',   roles: ['admin','manager'],   group: '管理',     mod: 'm_analysis' },
+  { id: 'tasks',      label: '任务看板',   icon: 'tasks',      href: 'tasks.html',      roles: null,                  group: '管理',     mod: 'm_tasks' },
+  { id: 'projects',   label: '项目管理',   icon: 'projects',   href: 'projects.html',   roles: null,                  group: '管理',     mod: 'm_projects' },
+  { id: 'members',    label: '人员管理',   icon: 'members',    href: 'members.html',    roles: ['admin','manager'],   group: '系统设置', mod: 'm_members' },
+  { id: 'departments',label: '部门管理',   icon: 'dept',       href: 'departments.html',roles: ['admin'],             group: '系统设置', mod: 'm_departments' },
+  { id: 'roles',      label: '用户角色',   icon: 'role',       href: 'roles.html',      roles: ['admin'],             group: '系统设置', mod: 'm_roles' },
+  { id: 'settings',   label: '系统参数',   icon: 'settings',   href: 'settings.html',   roles: ['admin'],             group: '系统设置', mod: 'm_settings' },
+  { id: 'files',      label: '附件管理',   icon: 'files',      href: 'settings-files.html', roles: ['admin'],         group: '系统设置', mod: 'm_files' },
+  { id: 'about',      label: '关于我们',   icon: 'about',      href: 'about.html',      roles: null,                  group: '系统设置', mod: 'm_about' },
+  { id: 'me',         label: '个人中心',   icon: 'me',         href: 'me.html',         roles: null,                  group: '系统设置', mod: 'm_me' }
 ];
+
+/* 导航分组顺序, sidebar 与模块勾选面板共用 */
+var NAV_GROUP_ORDER = ['工作台', '填报', '管理', '系统设置'];
+
+/* 可访问模块清单 (单一事实来源 = NAV_ITEMS)
+ * 「用户角色」编辑弹窗的「可访问模块」按 group 分组渲染本表;
+ * 与后端 server/app.py 的 DEFAULT_ROLE_MODULES 中的 m_xxx 一一对应。 */
+var MODULES_LIST = NAV_ITEMS.map(function (it) {
+  return { id: it.mod, label: it.label, group: it.group, href: it.href, icon: it.icon };
+});
+/* id -> 定义 的快速索引, 供拦截提示 / 调试用 */
+var MODULE_MAP = MODULES_LIST.reduce(function (acc, m) { acc[m.id] = m; return acc; }, {});
 
 /* ===== Top Nav HTML ===== */
 function renderTopBar(user) {
@@ -84,17 +99,37 @@ function renderTopBar(user) {
   '</header>';
 }
 
+/* 单个导航项是否对该用户可见
+ * state = resolveRoleModules(user) 的返回值, 语义:
+ *   { mode:'all' }    管理员 / 模块含 __ALL__ → 全放行
+ *   { mode:'list', mods:[...] } 已配置模块 → 严格按勾选项
+ *   { mode:'legacy' } 角色未配置 modules → 回落 NAV_ITEMS[].roles 白名单 */
+function navItemVisible(it, state) {
+  if (!state) return true;                       /* 缓存未就绪, 先不拦, 避免白屏 */
+  if (state.mode === 'all') return true;
+  if (state.mode === 'list') return (state.mods || []).indexOf(it.mod) >= 0;
+  /* legacy: 历史 roles 白名单; 老 key manager/viewer 视同 lead/worker */
+  if (!it.roles) return true;
+  var LEGACY = { manager: 'lead', viewer: 'worker' };
+  var raw = (state.roleKey || '');
+  var norm = LEGACY[raw] || raw;
+  return it.roles.indexOf(raw) >= 0 || it.roles.indexOf(norm) >= 0;
+}
+
 /* ===== Sidebar HTML ===== */
 function renderSidebar(user, activeId) {
-  /* 按 group 分组 */
+  /* 按 group 分组 —— 双闸门:
+   * ① 可访问模块 (角色.modules, 单一事实来源): 未勾选 → 导航里直接不渲染
+   * ② 历史 roles 白名单: 仅在角色尚未配置 modules 时兜底, 避免老库被锁死 */
+  var state = (typeof resolveRoleModules === 'function') ? resolveRoleModules(user) : null;
   var groups = {};
   NAV_ITEMS.forEach(function (it) {
-    if (it.roles && it.roles.indexOf(user.role) < 0) return;
+    if (!navItemVisible(it, state)) return;
     if (!groups[it.group]) groups[it.group] = [];
     groups[it.group].push(it);
   });
 
-  var groupOrder = ['工作台', '填报', '管理', '系统设置'];
+  var groupOrder = NAV_GROUP_ORDER;
   var html = groupOrder.map(function (g) {
     if (!groups[g] || groups[g].length === 0) return '';
     var items = groups[g].map(function (it) {
@@ -206,6 +241,8 @@ function renderPage(opts) {
   if (!mount) return null;
   var content = renderLayout(Object.assign({}, opts, { mount: mount }));
   if (opts.afterRender) opts.afterRender(content);
+  /* 动作级权限守卫: 隐藏当前角色无权限的按钮, 并持续覆盖之后动态渲染的部分 */
+  if (typeof initPermGuard === 'function') initPermGuard();
   return content;
 }
 

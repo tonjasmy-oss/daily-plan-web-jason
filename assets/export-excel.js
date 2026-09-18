@@ -52,7 +52,8 @@ function exportReportToExcel(report, onDone) {
   });
   if (!hasTask) wsData.push(['无任务记录']);
   wsData.push(['']);
-  if (report.signature) wsData.push(['签名', '已签名']);
+  if (report.fill_signature) wsData.push(['填报人签名', '已签名']);
+  if (report.signature) wsData.push(['审批签名', '已签名']);
   wsData.push(['']);
 
   /* 附件汇总（只列文件名与数量, 不嵌图片）

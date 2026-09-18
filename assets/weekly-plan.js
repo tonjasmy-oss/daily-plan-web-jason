@@ -57,10 +57,10 @@ async function initWeeklyPlanPage() {
       '<div class="form-hint">开始日期选定后按 7 天自动补齐, 可手动调整</div></div>' +
       '</div></div>' +
       '<div class="section"><h3>任务列表</h3><div id="wpTasks" class="task-list"></div>' +
-      '<div class="task-list-add-row"><button class="btn-primary" id="wpAdd">+ 添加任务</button></div></div>' +
+      '<div class="task-list-add-row"><button class="btn-primary" id="wpAdd" data-perm="p_create">+ 添加任务</button></div></div>' +
       '<div class="report-actions">' +
-        '<button class="btn btn-primary btn-lg" id="wpSubmit">提交审批</button>' +
-        '<button class="btn btn-default btn-lg" id="wpSaveDraft">保存草稿</button>' +
+        '<button class="btn btn-primary btn-lg" id="wpSubmit" data-perm="p_create">提交审批</button>' +
+        '<button class="btn btn-default btn-lg" id="wpSaveDraft" data-perm="p_create">保存草稿</button>' +
       '</div>'
   });
 
@@ -156,7 +156,7 @@ async function initWeeklyPlanPage() {
     var actions = '';
     if (st === 'rejected') {
       actions = '<div class="dp-approval-actions">' +
-        '<button class="btn btn-primary btn-lg" id="wpReopen">修改并重新提交</button>' +
+        '<button class="btn btn-primary btn-lg" id="wpReopen" data-perm="p_edit">修改并重新提交</button>' +
         '<span class="muted" style="font-size:13px;margin-left:8px">修改后将以原 ID 覆盖提交</span>' +
         '</div>';
     } else if (st === 'pending') {

@@ -18,7 +18,7 @@ async function initProjectsPage() {
               return '<option value="' + k + '">' + PROJECT_STATUS_TEXT[k] + '</option>';
             }).join('') +
           '</select>' +
-          (canManage() ? '<button class="btn btn-primary" id="btnAdd">+ 新建项目</button>' : '') +
+          (canManage() ? '<button class="btn btn-primary" id="btnAdd" data-perm="p_create">+ 新建项目</button>' : '') +
         '</div>' +
       '</div>' +
       '<div class="project-grid" id="projectGrid"></div>'
@@ -62,9 +62,9 @@ async function initProjectsPage() {
           '<span>📋 ' + doneCount + '/' + tasks.length + ' 任务</span>' +
         '</div>' +
         (canManage() ? '<div class="project-card-actions">' +
-          '<button class="btn-link" data-act="edit" data-id="' + esc(p._id) + '">编辑</button>' +
+          '<button class="btn-link" data-act="edit" data-id="' + esc(p._id) + '" data-perm="p_edit">编辑</button>' +
           '<button class="btn-link" data-act="archive" data-id="' + esc(p._id) + '">' + (p.status === PROJECT_STATUS.ARCHIVED ? '取消归档' : '归档') + '</button>' +
-          '<button class="btn-link danger" data-act="delete" data-id="' + esc(p._id) + '">删除</button>' +
+          '<button class="btn-link danger" data-act="delete" data-id="' + esc(p._id) + '" data-perm="p_delete">删除</button>' +
         '</div>' : '') +
       '</div>';
     }).join('');

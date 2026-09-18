@@ -758,23 +758,41 @@ function requireLogin() {
  *   - 管理员 (isAdmin) 默认全部放行, 兼容老系统管理员不被锁
  *   - 老角色无 modules 字段时, 默认全部放行 (向前兼容)
  * ============================================================ */
-function userModules(user) {
-  if (!user) return [];
-  if (isAdmin.call(null, user)) return '__ALL__';  /* 标记全员 */
-  var roles = (typeof loadRoles === 'function') ? (loadRoles() || []) : [];
-  /* 优先按 role 字段在 members 里取 (角色已存到 member.role_key / member.role), 这里保留 key 双查 */
+/* 解析用户的模块访问状态 (导航过滤 + 页面拦截共用的唯一入口)
+ * 三态语义:
+ *   { mode:'all',    roleKey }  管理员 / 模块含 __ALL__  → 全放行
+ *   { mode:'list',   roleKey, mods:[...] }  角色已配置 modules → 严格按勾选项 (空数组 = 全部禁止)
+ *   { mode:'legacy', roleKey }  角色记录缺失 / 未配置 modules / 角色缓存未就绪 → 向前兼容, 放行
+ * 注意: 管理员永远放行, 避免「把管理员的 m_roles 取消勾选」后无人能进角色页自救。
+ */
+function resolveRoleModules(user) {
+  if (!user) return { mode: 'list', mods: [] };
   var roleKey = user.roleKey || user.role || '';
-  var r = roles.filter(function (x) { return x.key === roleKey || x._id === user.roleId; })[0];
-  if (!r) return [];  /* 没匹配到角色 = 没有模块 */
-  return Array.isArray(r.modules) ? r.modules : [];
+  if (roleKey === 'admin') return { mode: 'all', roleKey: roleKey };
+  if (typeof loadRoles !== 'function') return { mode: 'legacy', roleKey: roleKey };
+  var roles = loadRoles() || [];
+  if (!roles.length) return { mode: 'legacy', roleKey: roleKey };  /* roles 尚未拉到, 不拦 */
+  /* 双路匹配 key / _id; 两侧都必须有值才比较,
+   * 否则会退化成 undefined === undefined 而误命中第一条角色 */
+  var roleId = user.roleId || user.role_id || '';
+  var r = roles.filter(function (x) {
+    return (roleKey && x.key === roleKey) || (roleId && x._id === roleId);
+  })[0];
+  if (!r || !Array.isArray(r.modules)) return { mode: 'legacy', roleKey: roleKey };
+  if (r.modules.indexOf('__ALL__') >= 0) return { mode: 'all', roleKey: roleKey };
+  return { mode: 'list', roleKey: roleKey, mods: r.modules };
+}
+function userModules(user) {
+  var st = resolveRoleModules(user);
+  if (st.mode === 'list') return st.mods || [];
+  return '__ALL__';   /* all / legacy 都视为全放行 */
 }
 function canAccessModule(user, mod) {
   if (!mod) return true;
   if (!user) return false;
-  if (user.role === 'admin') return true;  /* 管理员角色 key 硬编码放行 */
-  var ms = userModules(user);
-  if (ms === '__ALL__') return true;
-  return ms.indexOf(mod) >= 0;
+  var st = resolveRoleModules(user);
+  if (st.mode !== 'list') return true;            /* all / legacy 放行 */
+  return (st.mods || []).indexOf(mod) >= 0;
 }
 /* 拦截函数: requireLogin 之后调用. 未授权 -> toast + 跳 dashboard */
 function requireModule(mod) {
@@ -1086,6 +1104,73 @@ function isAdmin() {
   var u = getCurrentUser();
   return !!(u && u.role === 'admin');
 }
+
+/* ============================================================
+ * 动作级权限 (roles.permissions)
+ *   模块级(modules) 管"能不能进这个页面"
+ *   动作级(permissions) 管"进了页面能不能改数据"
+ *   - 管理员 (role==='admin') 永远放行, 防止把自己锁死
+ *   - 角色记录缺失 / 未配置 permissions → 向前兼容放行(legacy)
+ *   - 判定入口 hasPerm(); 标记入口 给元素加 data-perm="p_create"
+ *     (可写多个, 空格分隔, 满足任一即保留)
+ * ============================================================ */
+function resolveRolePerms(user) {
+  var u = user || getCurrentUser();
+  if (!u) return { mode: 'none', perms: [] };
+  if (u.role === 'admin') return { mode: 'all', perms: null };
+  var roles = (typeof loadRoles === 'function') ? (loadRoles() || []) : [];
+  if (!roles.length) return { mode: 'legacy', perms: null };
+  var roleKey = u.roleKey || u.role || '';
+  var roleId = u.roleId || u.role_id || '';
+  /* 两侧都要有值才比较, 避免 undefined === undefined 误命中第一条角色 */
+  var r = roles.filter(function (x) {
+    return (roleKey && x.key === roleKey) || (roleId && x._id === roleId);
+  })[0];
+  if (!r || !Array.isArray(r.permissions)) return { mode: 'legacy', perms: null };
+  return { mode: 'list', perms: r.permissions };
+}
+function hasPerm(p) {
+  if (!p) return true;
+  var st = resolveRolePerms();
+  if (st.mode === 'all' || st.mode === 'legacy') return true;
+  if (st.mode === 'none') return false;
+  return (st.perms || []).indexOf(p) >= 0;
+}
+/* 扫描所有带 data-perm 的节点: 无权限则隐藏。
+ * 幂等 —— 反复调用结果一致(有权限的会恢复显示), 因此可在
+ * 角色数据加载完成前后各执行一次而不出错。 */
+function applyPermGuard(root) {
+  root = root || document;
+  if (!root.querySelectorAll) return;
+  var list = root.querySelectorAll('[data-perm]');
+  Array.prototype.forEach.call(list, function (el) {
+    var need = String(el.getAttribute('data-perm') || '').split(/\s+/).filter(Boolean);
+    if (!need.length) return;
+    var ok = need.some(function (p) { return hasPerm(p); });
+    /* 隐藏而非移除: 页面脚本仍能 getElementById 拿到它并绑事件, 不会报错 */
+    el.style.display = ok ? '' : 'none';
+    if ('disabled' in el) el.disabled = !ok;
+  });
+}
+/* 启动守卫: 当前 DOM 扫一遍 + 监听后续动态渲染的按钮 (只挂一次) */
+var _permGuardObserver = null;
+function initPermGuard() {
+  applyPermGuard(document);
+  if (_permGuardObserver || typeof MutationObserver === 'undefined') return;
+  try {
+    _permGuardObserver = new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var added = muts[i].addedNodes || [];
+        for (var j = 0; j < added.length; j++) {
+          if (added[j].nodeType === 1) applyPermGuard(added[j]);
+        }
+      }
+    });
+    /* 注意: observe() 返回 undefined, 必须与赋值分开写, 否则标志会被冲掉 */
+    _permGuardObserver.observe(document.body, { childList: true, subtree: true });
+  } catch (_) { /* 环境不支持则退化为仅首屏扫描 */ }
+}
+
 function canManage() {
   /* 管理员 + 主管 (对应 roles 表的 key: admin/lead) */
   var u = getCurrentUser();

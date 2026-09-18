@@ -15,7 +15,7 @@ async function initReportsPage() {
       '<div class="page-header-row">' +
         '<h2 class="page-title-text">日报记录</h2>' +
         '<div class="page-actions">' +
-          '<button class="btn btn-primary" id="btnNew">+ 新建日报</button>' +
+          '<button class="btn btn-primary" id="btnNew" data-perm="p_create">+ 新建日报</button>' +
         '</div>' +
       '</div>' +
       '<div class="report-filter-tabs" id="statusTabs"></div>' +
@@ -82,7 +82,7 @@ async function initReportsPage() {
         '<span class="muted">' + esc(timeMeta) + '</span>' +
         '<span class="report-card-actions">' +
           '<button class="btn-link" data-act="view">查看</button>' +
-          '<button class="btn-link danger" data-act="delete">删除</button>' +
+          '<button class="btn-link danger" data-act="delete" data-perm="p_delete">删除</button>' +
         '</span>' +
       '</div>' +
     '</div>';

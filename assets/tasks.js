@@ -20,7 +20,7 @@ async function initTasksPage() {
             '<button class="view-toggle-btn active" data-view="board">看板</button>' +
             '<button class="view-toggle-btn" data-view="list">列表</button>' +
           '</div>' +
-          '<button class="btn btn-primary" id="btnAdd">+ 新建任务</button>' +
+          '<button class="btn btn-primary" id="btnAdd" data-perm="p_create">+ 新建任务</button>' +
         '</div>' +
       '</div>' +
       '<div class="filter-bar">' +

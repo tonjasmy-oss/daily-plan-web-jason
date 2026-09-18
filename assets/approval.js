@@ -115,7 +115,7 @@ async function initApprovalPage() {
         '</div>' +
         '<div style="display:flex;gap:8px;align-items:center;flex-shrink:0">' +
         (r.status === 'pending'
-          ? '<button class="btn btn-primary" data-plan-open="' + i + '">审批</button>'
+          ? '<button class="btn btn-primary" data-plan-open="' + i + '" data-perm="p_approve">审批</button>'
           : '<button class="btn btn-default" data-plan-open="' + i + '">查看</button>') +
         '</div>' +
         '</div>';
@@ -150,8 +150,8 @@ async function initApprovalPage() {
         '</div>' +
         '<div style="display:flex;gap:8px;align-items:center;flex-shrink:0">' +
         (a.status === 'pending' ?
-          '<button class="btn-success" data-ok="' + a._id + '">通过</button>' +
-          '<button class="btn-danger" data-rj="' + a._id + '">驳回</button>'
+          '<button class="btn-success" data-ok="' + a._id + '" data-perm="p_approve">通过</button>' +
+          '<button class="btn-danger" data-rj="' + a._id + '" data-perm="p_approve">驳回</button>'
           : '<span class="muted">' + (a.decided_at || '').slice(0, 16) + '</span>') +
         '</div>' +
         '</div>';

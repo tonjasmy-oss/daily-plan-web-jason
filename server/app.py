@@ -137,6 +137,8 @@ CREATE TABLE IF NOT EXISTS reports (
   approver TEXT DEFAULT '',
   rejected_reason TEXT DEFAULT '',
   signature TEXT DEFAULT '',
+  fill_signature TEXT DEFAULT '',
+  fill_signed_at TEXT DEFAULT '',
   tasks_json TEXT DEFAULT '[]',
   categories_json TEXT DEFAULT '{}',
   created_by TEXT DEFAULT '',
@@ -403,6 +405,9 @@ def row_to_report(r):
         'remarks': r['remarks'], 'approver': r['approver'],
         'rejected_reason': r['rejected_reason'],
         'signature': r['signature'],
+        # 填报人签名(个人填报签名): 老库无此列时回退空串
+        'fill_signature': _col(r, 'fill_signature', ''),
+        'fill_signed_at': _col(r, 'fill_signed_at', ''),
         'tasks': json.loads(r['tasks_json'] or '[]'),
         'categories': json.loads(_col(r, 'categories_json', '') or '{}'),
         'created_by': r['created_by'],
@@ -605,13 +610,14 @@ DEFAULT_ROLE_MODULES = {
     'admin': [
         'm_dashboard', 'm_daily_plan', 'm_weekly_plan', 'm_report', 'm_weekly_rpt',
         'm_browse', 'm_purchase', 'm_reports', 'm_approval', 'm_purchase_mgmt',
-        'm_tasks', 'm_projects', 'm_members', 'm_departments', 'm_roles',
-        'm_settings', 'm_files', 'm_about', 'm_me',
+        'm_analysis', 'm_tasks', 'm_projects', 'm_members', 'm_departments',
+        'm_roles', 'm_settings', 'm_files', 'm_about', 'm_me',
     ],
     'lead': [
         'm_dashboard', 'm_daily_plan', 'm_weekly_plan', 'm_report', 'm_weekly_rpt',
         'm_browse', 'm_purchase', 'm_reports', 'm_approval', 'm_purchase_mgmt',
-        'm_tasks', 'm_projects', 'm_members', 'm_departments', 'm_about', 'm_me',
+        'm_analysis', 'm_tasks', 'm_projects', 'm_members', 'm_departments',
+        'm_about', 'm_me',
     ],
     'foreman': [
         'm_dashboard', 'm_daily_plan', 'm_report', 'm_reports', 'm_browse',
@@ -621,6 +627,12 @@ DEFAULT_ROLE_MODULES = {
         'm_dashboard', 'm_daily_plan', 'm_report', 'm_reports', 'm_about', 'm_me',
     ],
 }
+
+# 「默认可访问模块」的播种版本号。每次给 DEFAULT_ROLE_MODULES 里新增模块 id 时 +1,
+# 迁移会据此把新增项追加给已配置的角色 (只追加, 不覆盖用户手动取消的勾选)。
+#   v1 (隐式): 首次播种, modules 为空的内置角色按 DEFAULT_ROLE_MODULES 整份补齐
+#   v2        : 新增 m_analysis (分析空间)
+ROLES_MODULES_SEED_VERSION = 2
 
 
 def normalize_role(conn, role):
@@ -653,6 +665,9 @@ def migrate_db():
             'reports': [
                 ('plan_date', "TEXT DEFAULT ''"),
                 ('categories_json', "TEXT DEFAULT '{}'"),
+                # 填报人签名 = 个人填报签名(与审批签名 signature 分开存放)
+                ('fill_signature', "TEXT DEFAULT ''"),
+                ('fill_signed_at', "TEXT DEFAULT ''"),
             ],
             'daily_plans': [
                 ('edited_by', "TEXT DEFAULT ''"),
@@ -939,7 +954,13 @@ def _migrate_roles(conn):
 
     done = conn.execute(
         "SELECT value_json FROM settings WHERE key='roles_modules_seeded'").fetchone()
+    cur_ver = 0
     if done:
+        try:
+            cur_ver = int(json.loads(done['value_json']))
+        except Exception:
+            cur_ver = 1   # 老格式存的是字符串 '1', 解析失败按 v1 处理
+    if cur_ver >= ROLES_MODULES_SEED_VERSION:
         return
 
     role_keys = {row['key'] for row in conn.execute('SELECT key FROM roles').fetchall()}
@@ -948,14 +969,28 @@ def _migrate_roles(conn):
             continue
         row = conn.execute(
             'SELECT id, modules_json FROM roles WHERE key=?', (key,)).fetchone()
-        if row and not (row['modules_json'] or '').replace('[', '').replace(']', '').strip():
+        if not row:
+            continue
+        try:
+            cur = json.loads(row['modules_json'] or '[]') or []
+        except Exception:
+            cur = []
+        if not cur:
+            # 从未配置过 → 整份写入默认 (否则该角色连导航栏都是空的)
             conn.execute('UPDATE roles SET modules_json=?, updated_at=? WHERE id=?',
                          (json.dumps(mods), now_iso(), row['id']))
             print('[migrate] roles(%s) 补齐可访问模块 %d 项' % (key, len(mods)))
+        else:
+            # 已配置过 → 只追加本版本新增的模块, 不覆盖用户手动取消的勾选
+            added = [m for m in mods if m not in cur]
+            if added:
+                conn.execute('UPDATE roles SET modules_json=?, updated_at=? WHERE id=?',
+                             (json.dumps(cur + added), now_iso(), row['id']))
+                print('[migrate] roles(%s) 追加新增模块 %s' % (key, ', '.join(added)))
 
     conn.execute(
         'INSERT OR REPLACE INTO settings (key, value_json, updated_at) VALUES (?,?,?)',
-        ('roles_modules_seeded', json.dumps('1'), now_iso()))
+        ('roles_modules_seeded', json.dumps(ROLES_MODULES_SEED_VERSION), now_iso()))
 
 
 
@@ -1315,6 +1350,13 @@ def upsert_report(conn, data, uid):
     submitted = prev('submitted_at')
     signed = prev('signed_at')
     rejected = prev('rejected_at')
+    # 填报人签名(个人填报签名): 只记录签名图片与时间, 不改变 status
+    prev_fill_sign = _col(old, 'fill_signature', '') if old is not None else ''
+    fill_sign = data.get('fill_signature') or prev_fill_sign
+    fill_signed = (data.get('fill_signed_at')
+                   or (_col(old, 'fill_signed_at', '') if old is not None else ''))
+    if fill_sign and not prev_fill_sign:
+        fill_signed = now
     if old is None:
         if status in ('submitted', 'signed', 'rejected'):
             submitted = submitted or now
@@ -1339,14 +1381,14 @@ def upsert_report(conn, data, uid):
               json.dumps(data.get('tasks', []), ensure_ascii=False),
               json.dumps(data.get('categories') or {}, ensure_ascii=False),
               uid if old is None else (old['created_by'] or uid),
-              submitted, signed, rejected)
+              submitted, signed, rejected, fill_sign, fill_signed)
     if old:
         conn.execute(
-            'UPDATE reports SET date=?,plan_date=?,status=?,remarks=?,approver=?,rejected_reason=?,signature=?,tasks_json=?,categories_json=?,created_by=?,submitted_at=?,signed_at=?,rejected_at=?,updated_at=? WHERE id=?',
+            'UPDATE reports SET date=?,plan_date=?,status=?,remarks=?,approver=?,rejected_reason=?,signature=?,tasks_json=?,categories_json=?,created_by=?,submitted_at=?,signed_at=?,rejected_at=?,fill_signature=?,fill_signed_at=?,updated_at=? WHERE id=?',
             fields + (now, rid))
     else:
         conn.execute(
-            'INSERT INTO reports (id,date,plan_date,status,remarks,approver,rejected_reason,signature,tasks_json,categories_json,created_by,submitted_at,signed_at,rejected_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO reports (id,date,plan_date,status,remarks,approver,rejected_reason,signature,tasks_json,categories_json,created_by,submitted_at,signed_at,rejected_at,fill_signature,fill_signed_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (rid,) + fields + (data.get('created_at') or now, now))
     conn.commit()
     return rid
@@ -2517,6 +2559,13 @@ class Handler(BaseHTTPRequestHandler):
             '/api/departments':   ('departments',   row_to_department,   upsert_department,   list_departments,   'd'),
             '/api/roles':         ('roles',         row_to_role,         upsert_role,         list_roles,         'r'),
         }
+
+        # 角色表是权限体系的根: 写操作仅限管理员, 防止主管等角色自我提权
+        # 列表/创建 与 单条更新/删除 两个分支共用此检查; 读操作不受限
+        if path.startswith('/api/roles') and method in ('POST', 'PUT', 'DELETE'):
+            if not self._require_admin(uid):
+                conn.close()
+                return
 
         # 列表 / 创建
         for list_path, (table, to_row, upsert_fn, list_fn, prefix) in REST_RULES.items():

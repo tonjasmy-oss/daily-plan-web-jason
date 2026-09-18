@@ -21,7 +21,7 @@ async function initMembersPage() {
       '<h2 class="page-title-text">人员管理</h2>' +
       '<div class="page-actions">' +
         '<input type="search" class="input page-search" id="searchInput" placeholder="搜索姓名/工种/电话">' +
-        '<button class="btn btn-primary" id="btnAdd">+ 新增人员</button>' +
+        '<button class="btn btn-primary" id="btnAdd" data-perm="p_create">+ 新增人员</button>' +
       '</div>' +
     '</div>' +
     '<div class="member-stats" id="memberStats"></div>' +
@@ -81,12 +81,12 @@ async function initMembersPage() {
             '<div class="member-sub">' + esc(m.workType || '未指定工种') + (m.phone ? ' · 📞 ' + esc(m.phone) : '') + '</div>' +
           '</div>' +
           '<div class="member-actions">' +
-            '<button class="btn-icon" data-act="edit" data-id="' + esc(m._id) + '" title="编辑">✎</button>' +
+            '<button class="btn-icon" data-act="edit" data-id="' + esc(m._id) + '" title="编辑" data-perm="p_edit">✎</button>' +
             (user.role === 'admin'
-              ? '<button class="btn-icon" data-act="resetpwd" data-id="' + esc(m._id) + '" title="重置登录密码">🔑</button>'
+              ? '<button class="btn-icon" data-act="resetpwd" data-id="' + esc(m._id) + '" title="重置登录密码" data-perm="p_edit">🔑</button>'
               : '') +
             (m._id === user._id ? '' :
-              '<button class="btn-icon danger" data-act="delete" data-id="' + esc(m._id) + '" title="删除">🗑</button>') +
+              '<button class="btn-icon danger" data-act="delete" data-id="' + esc(m._id) + '" title="删除" data-perm="p_delete">🗑</button>') +
           '</div>' +
         '</div>' +
         '<div class="member-row2">' +

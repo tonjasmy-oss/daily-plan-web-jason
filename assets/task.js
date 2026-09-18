@@ -44,8 +44,8 @@ async function initTaskDetailPage() {
           '<select class="input" id="quickStatus"><option value="">切换状态</option>' +
             Object.keys(TASK_STATUS_TEXT).map(function (k) { return '<option value="' + k + '">' + TASK_STATUS_TEXT[k] + '</option>'; }).join('') +
           '</select>' +
-          '<button class="btn btn-default" id="btnEdit">编辑</button>' +
-          '<button class="btn btn-danger" id="btnDelete">删除</button>' +
+          '<button class="btn btn-default" id="btnEdit" data-perm="p_edit">编辑</button>' +
+          '<button class="btn btn-danger" id="btnDelete" data-perm="p_delete">删除</button>' +
         '</div>' +
       '</div>' +
       '<div class="detail-section">' +

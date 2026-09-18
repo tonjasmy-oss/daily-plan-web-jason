@@ -96,16 +96,10 @@ async function initAnalysisPage() {
   var user = await requireLogin();
   if (!user) return;
 
-  /* 仅管理员 / 主管可进 */
-  if (user.role !== 'admin' && user.role !== 'manager') {
-    document.getElementById('app').innerHTML =
-      '<div class="empty-state">' +
-        '<div class="empty-icon">🔒</div>' +
-        '<p>分析空间仅对管理员与主管开放</p>' +
-        '<a class="btn btn-primary" href="dashboard.html">返回工作台</a>' +
-      '</div>';
-    return;
-  }
+  /* 模块级拦截: 由「用户角色 > 可访问模块」的 m_analysis 勾选决定
+   * (原硬编码 role 白名单 'admin'/'manager' 已废弃 —— 'manager' 是老 key,
+   *  现规范 key 为 'lead', 会导致主管被误挡在门外) */
+  if (!requireModule('m_analysis')) return;
 
   /* 容器壳 */
   var content = renderPage({

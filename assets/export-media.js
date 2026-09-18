@@ -236,7 +236,8 @@ function pbxBodyReport(rec) {
     ['报表类别', esc(cats.join('、'))],
     ['审批人', esc(rec.approver)],
     ['提交时间', esc(rec.submitted_at ? formatDateTime(rec.submitted_at) : '')],
-    ['签名时间', esc(rec.signed_at ? formatDateTime(rec.signed_at) : '')],
+    ['填报签名时间', esc(rec.fill_signed_at ? formatDateTime(rec.fill_signed_at) : '')],
+    ['审批签名时间', esc(rec.signed_at ? formatDateTime(rec.signed_at) : '')],
     (rec.status === 'rejected' && rec.rejected_reason) ? ['驳回原因', esc(rec.rejected_reason)] : null
   ]);
 
@@ -265,10 +266,16 @@ function pbxBodyReport(rec) {
     (photos.length ? pbxHeading('现场照片（' + photos.length + ' 张）') + pbxPhotoTable(photos) : '') +
     pbxHeading('备注') +
     '<div class="pbx-remarks">' + (esc(rec.remarks) || '无') + '</div>' +
-    pbxHeading('签名') +
+    pbxHeading('填报人签名') +
+    '<div class="pbx-sign">' +
+      (rec.fill_signature
+        ? '<img src="' + esc(rec.fill_signature) + '" alt="填报人签名">'
+        : '<div class="pbx-empty">未签名</div>') +
+    '</div>' +
+    pbxHeading('审批签名') +
     '<div class="pbx-sign">' +
       (rec.signature
-        ? '<img src="' + esc(rec.signature) + '" alt="签名">'
+        ? '<img src="' + esc(rec.signature) + '" alt="审批签名">'
         : '<div class="pbx-empty">未签名</div>') +
     '</div>';
 }

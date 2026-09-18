@@ -28,7 +28,7 @@ async function initSettingsPage() {
     pageHtml:
       '<nav class="breadcrumb"><a href="dashboard.html">工作台</a><span class="sep">/</span><span>系统设置</span><span class="sep">/</span><span>系统参数</span></nav>' +
       '<div class="page-header"><div><h2>系统参数</h2><div class="page-sub">全局应用配置,影响整个系统的展示与功能</div></div>' +
-      '<div class="page-actions"><button class="btn-success" id="stSave">保存设置</button></div></div>' +
+      '<div class="page-actions"><button class="btn-success" id="stSave" data-perm="p_create">保存设置</button></div></div>' +
       '<div class="section"><h3>基础信息</h3><div class="form-grid">' +
       field('应用名称', 'stAppName', s.appName, 'text') +
       field('版本号', 'stVersion', s.version, 'text') +
@@ -47,7 +47,7 @@ async function initSettingsPage() {
       '</div>' +
       '<div id="wtToolbar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
       '<input class="input" id="wtNewName" placeholder="新工种名称, 例: 钢结构焊工" style="max-width:280px">' +
-      '<button class="btn-success" id="wtAdd">添加</button>' +
+      '<button class="btn-success" id="wtAdd" data-perm="p_create">添加</button>' +
       '<button class="btn-ghost" id="wtReset">恢复默认 9 项</button>' +
       '</div>' +
       '<div id="wtList"></div>' +
@@ -64,7 +64,7 @@ async function initSettingsPage() {
       '<button class="btn-ghost" id="stReloadPath">测试连接</button>' +
       '</div></div>' +
       '<div class="section"><h3>危险操作</h3><div style="display:flex;gap:12px;flex-wrap:wrap">' +
-      '<button class="btn-ghost" id="stExport">导出全部数据 (服务端)</button>' +
+      '<button class="btn-ghost" id="stExport" data-perm="p_export">导出全部数据 (服务端)</button>' +
       '<button class="btn-ghost" id="stImport">从备份恢复</button>' +
       '<button class="btn-danger" id="stReset">清空全部数据 (服务端)</button>' +
       '</div></div>'
@@ -109,8 +109,8 @@ async function initSettingsPage() {
       html = '<div style="display:grid;gap:8px">' + items.map(function (w) {
         return '<div data-wt-id="' + esc(w._id) + '" style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--input-bg)">' +
           '<input class="input wt-name" data-original="' + esc(w.name) + '" value="' + esc(w.name) + '" style="flex:1">' +
-          '<button class="btn-ghost wt-save">保存</button>' +
-          '<button class="btn-danger wt-del">删除</button>' +
+          '<button class="btn-ghost wt-save" data-perm="p_create">保存</button>' +
+          '<button class="btn-danger wt-del" data-perm="p_delete">删除</button>' +
           '</div>';
       }).join('') + '</div>';
     }

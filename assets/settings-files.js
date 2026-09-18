@@ -26,7 +26,7 @@ function fmSkeleton() {
       '<div><h2>附件管理</h2><div class="page-sub">浏览服务端附件目录，支持图片预览、单张下载与批量打包下载</div></div>' +
       '<div class="page-actions">' +
         '<button class="btn-secondary" id="fmRefresh">刷新</button>' +
-        '<button class="btn-primary" id="fmZip" disabled>批量下载 (ZIP)</button>' +
+        '<button class="btn-primary" id="fmZip" disabled data-perm="p_export">批量下载 (ZIP)</button>' +
       '</div>' +
     '</div>' +
     '<div class="fm-pathbar">' +
@@ -280,7 +280,7 @@ function fmPreview(it) {
       '<div class="fm-lb-bar">' +
         '<span class="fm-lb-name">' + esc(it.name) + '</span>' +
         '<span class="fm-lb-actions">' +
-          '<button class="btn-secondary btn-sm" data-lb-dl>下载</button>' +
+          '<button class="btn-secondary btn-sm" data-lb-dl data-perm="p_export">下载</button>' +
           '<button class="btn-ghost btn-sm" data-lb-close>关闭</button>' +
         '</span>' +
       '</div>' +

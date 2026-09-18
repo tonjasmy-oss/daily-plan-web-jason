@@ -115,8 +115,8 @@ async function initPurchaseDetailPage() {
   var canManage = (user.role === 'admin' || user.role === 'manager' || user.role === 'lead');
   var actionsHtml = '<button class="btn-ghost" onclick="history.length>1?history.back():location.href=\'purchase-mgmt.html\'">← 返回</button>';
   if (rec.status === 'submitted' && canManage) {
-    actionsHtml += '<button class="btn-success" data-act="approve">通过</button>' +
-                   '<button class="btn-danger" data-act="reject">驳回</button>';
+    actionsHtml += '<button class="btn-success" data-act="approve" data-perm="p_approve">通过</button>' +
+                   '<button class="btn-danger" data-act="reject" data-perm="p_approve">驳回</button>';
   }
 
   /* 行内 helper: 基本信息卡片的一行 */
@@ -163,7 +163,7 @@ async function initPurchaseDetailPage() {
       '<div class="detail-section-header">' +
         '<h3>申购明细 <span class="sec-meta">共 ' + items.length + ' 项</span></h3>' +
         '<div class="detail-actions">' +
-          '<button class="btn-ghost btn-sm" data-act="export-row">导出此单 Excel</button>' +
+          '<button class="btn-ghost btn-sm" data-act="export-row" data-perm="p_export">导出此单 Excel</button>' +
         '</div>' +
       '</div>' +
       '<div class="table-wrap">' +
@@ -388,7 +388,7 @@ function renderGroupDetail(user, gid) {
   var canManage = (user.role === 'admin' || user.role === 'manager' || user.role === 'lead');
   var actionsHtml =
     '<button class="btn-ghost" onclick="history.length>1?history.back():location.href=\'purchase-mgmt.html\'">← 返回</button>' +
-    '<button class="btn-success" data-act="export-group">导出整批 Excel</button>' +
+    '<button class="btn-success" data-act="export-group" data-perm="p_export">导出整批 Excel</button>' +
     (canManage ? '<button class="btn-ghost" data-act="rename-group">重命名</button>' : '');
 
   var pageHtml =

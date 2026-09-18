@@ -350,7 +350,8 @@ function pbReportDetail(rec) {
                        rec.categories && rec.categories.repair ? '日常维修每日完成情况' : '']
       .filter(Boolean).join('、')) +
     pbMeta('提交时间', esc(pbTime(rec.submitted_at))) +
-    pbMeta('签名时间', esc(pbTime(rec.signed_at))) +
+    pbMeta('填报签名时间', esc(pbTime(rec.fill_signed_at))) +
+    pbMeta('审批签名时间', esc(pbTime(rec.signed_at))) +
     (rec.status === 'rejected' ? pbMeta('驳回原因', esc(rec.rejected_reason)) : '') +
     '</div>';
 
@@ -369,8 +370,11 @@ function pbReportDetail(rec) {
     ];
   });
 
-  var sign = rec.signature
-    ? '<div class="pb-sign"><img src="' + esc(rec.signature) + '" alt="签名"></div>'
+  var fillSign = rec.fill_signature
+    ? '<div class="pb-sign"><img src="' + esc(rec.fill_signature) + '" alt="填报人签名"></div>'
+    : '<div class="pb-remarks"><span class="muted">未签名</span></div>';
+  var approveSign = rec.signature
+    ? '<div class="pb-sign"><img src="' + esc(rec.signature) + '" alt="审批签名"></div>'
     : '<div class="pb-remarks"><span class="muted">未签名</span></div>';
 
   return meta +
@@ -378,7 +382,8 @@ function pbReportDetail(rec) {
       pbTable(['#', '工作内容', '实施人员', '完成时间', '状态', '未完成原因'], rows)) +
     pbPhotoBlock(rec.tasks) +
     pbBlock('备注', '', '<div class="pb-remarks">' + (esc(rec.remarks) || '<span class="muted">无</span>') + '</div>') +
-    pbBlock('签名', '', sign);
+    pbBlock('填报人签名', '', fillSign) +
+    pbBlock('审批签名', '', approveSign);
 }
 
 /* 审批追加的条目列表 (周报 / 计划类记录共用)
@@ -551,13 +556,13 @@ function pbApproveBox(rec, tab) {
         '<textarea class="textarea pb-reject-input" id="pbRejectInput" rows="5" ' +
           'placeholder="说明需要修改的地方，填报人可据此修改后重新提交"></textarea>' +
         '<div class="pb-approve-row">' +
-          '<button class="btn btn-danger-outline pb-approve-rj" type="button">驳回</button>' +
+          '<button class="btn btn-danger-outline pb-approve-rj" type="button" data-perm="p_approve">驳回</button>' +
         '</div>' +
       '</div>' +
     '</div>' +
     '<div class="pb-approve-final">' +
       '<span class="pb-approve-final-text">确认内容无误后通过审批 —— 通过后记录锁定，只能查看，不可修改</span>' +
-      '<button class="btn btn-success pb-approve-ok" type="button">✓ 通过审批</button>' +
+      '<button class="btn btn-success pb-approve-ok" type="button" data-perm="p_approve">✓ 通过审批</button>' +
     '</div>' +
   '</div>';
 }
@@ -662,7 +667,7 @@ function pbOpenEdit(ov, rec, tab, opts) {
       '<span class="sec-meta">修改会记录操作人与时间；保存后仍可继续追加或审批</span></div>' +
     editPlanFormHtml(rec, tab) +
     '<div class="pb-edit-actions">' +
-      '<button class="btn btn-primary pb-edit-save" type="button">保存修改</button>' +
+      '<button class="btn btn-primary pb-edit-save" type="button" data-perm="p_edit">保存修改</button>' +
       '<button class="btn btn-secondary pb-edit-cancel" type="button">取消</button>' +
     '</div>';
   view.hidden = true;

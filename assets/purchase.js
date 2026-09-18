@@ -60,10 +60,10 @@ async function initPurchasePage() {
       '</div></div>' +
       '<div class="section"><h3>申购明细 <span class="sec-meta" style="color:var(--danger)">带 * 号字段为必填</span></h3>' +
       '<div id="pcItems"></div>' +
-      '<div class="task-list-add-row" style="margin-top:16px"><button class="btn-primary" id="pcAddItem">+ 添加下一项</button></div>' +
+      '<div class="task-list-add-row" style="margin-top:16px"><button class="btn-primary" id="pcAddItem" data-perm="p_create">+ 添加下一项</button></div>' +
       '<div style="display:flex;gap:12px;justify-content:flex-end;margin-top:20px">' +
-      '<button class="btn-ghost" id="pcSaveDraft">保存草稿</button>' +
-      '<button class="btn-success" id="pcSubmit">提交申购</button>' +
+      '<button class="btn-ghost" id="pcSaveDraft" data-perm="p_create">保存草稿</button>' +
+      '<button class="btn-success" id="pcSubmit" data-perm="p_create">提交申购</button>' +
       '</div></div>' +
 
       '<div class="section"><h3>我的申购 <span class="sec-meta">草稿可点开继续编辑; 提交后转入审批流程</span></h3>' +
@@ -335,7 +335,7 @@ async function initPurchasePage() {
       var badge = '<span class="report-status-tag report-status-' +
         (classMap[r.status] || 'draft') + '">' + esc(statusMap[r.status] || r.status || '—') + '</span>';
       var action = edit
-        ? '<button class="btn-ghost btn-sm pc-edit-draft" data-id="' + esc(r._id) + '" type="button">继续编辑</button>'
+        ? '<button class="btn-ghost btn-sm pc-edit-draft" data-id="' + esc(r._id) + '" type="button" data-perm="p_edit">继续编辑</button>'
         : '<span class="chip">查看</span>';
       return '<div class="list-row pc-my-row">' +
         '<div><strong>' + esc(r.date || '(无日期)') + '</strong>' +

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>角色可访问模块配置表 · 公园置尚工程管理系统</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 32px;
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    color: #1a1a1a; background: #fff; font-size: 13px; line-height: 1.6;
+  }
+  .page { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: .5px; }
+  .sub { color: #666; font-size: 12px; margin-bottom: 18px; }
+  .sub b { color: #c0392b; }
+  h2 {
+    font-size: 14px; margin: 26px 0 10px; padding-left: 9px;
+    border-left: 4px solid #2c6e9b; color: #17475f;
+  }
+  .legend {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    background: #f5f8fa; border: 1px solid #dde6ec; border-radius: 6px;
+    padding: 9px 14px; font-size: 12px; margin-bottom: 6px;
+  }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .dot-on, .dot-new, .dot-off, .dot-tbd {
+    display: inline-block; width: 16px; height: 16px; line-height: 16px;
+    text-align: center; border-radius: 4px; font-size: 12px; font-weight: 700;
+  }
+  .dot-on  { background: #e3f0e3; color: #2e7d32; }
+  .dot-new { background: #fde8e4; color: #c0392b; }
+  .dot-off { background: #f2f2f2; color: #b0b0b0; }
+  .dot-tbd { background: #fff6d9; color: #a67c00; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th, td { border: 1px solid #d8e0e6; padding: 5px 8px; text-align: center; }
+  thead th {
+    background: #eef4f8; font-weight: 600; font-size: 12px;
+    color: #17475f; position: sticky; top: 0;
+  }
+  td.grp, th.grp { background: #f7f9fa; font-weight: 600; color: #556; width: 68px; }
+  td.name { text-align: left; font-weight: 500; }
+  td.code { text-align: left; color: #8a949c; font-size: 11px; font-family: Consolas, monospace; }
+  .yes { background: #e9f5e9; color: #2e7d32; font-weight: 700; }
+  .new { background: #fde8e4; color: #c0392b; font-weight: 700; }
+  .no  { color: #c7ced3; }
+  .tbd { background: #fff6d9; color: #a67c00; font-weight: 700; }
+  .rowgrp td { background: #f7f9fa; }
+  tbody tr:hover td { background: #f4f9fd; }
+  tbody tr:hover td.grp { background: #eef4f8; }
+  .note {
+    background: #fff8e6; border-left: 4px solid #e6a817; border-radius: 4px;
+    padding: 10px 14px; font-size: 12px; margin-top: 12px; color: #5a4a1a;
+  }
+  .warn {
+    background: #fdf0ef; border-left: 4px solid #c0392b; border-radius: 4px;
+    padding: 10px 14px; font-size: 12px; margin-top: 12px; color: #6b2118;
+  }
+  .note b, .warn b { display: block; margin-bottom: 3px; font-size: 12.5px; }
+  .summary { display: flex; gap: 12px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .card {
+    flex: 1; min-width: 150px; border: 1px solid #dde6ec; border-radius: 6px;
+    padding: 10px 13px; background: #fafcfd;
+  }
+  .card .t { font-size: 11.5px; color: #667; margin-bottom: 4px; }
+  .card .v { font-size: 17px; font-weight: 700; color: #17475f; }
+  .card .d { font-size: 11.5px; color: #2e7d32; margin-top: 2px; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin-bottom: 3px; }
+  code {
+    background: #f0f3f5; padding: 1px 5px; border-radius: 3px;
+    font-family: Consolas, monospace; font-size: 11.5px; color: #b03a2e;
+  }
+  .foot { margin-top: 26px; padding-top: 12px; border-top: 1px dashed #ccd6dd; color: #889; font-size: 11.5px; }
+  @media print {
+    @page { size: A4; margin: 12mm; }
+    body { padding: 0; font-size: 11.5px; }
+    h2 { margin-top: 18px; }
+    .page { max-width: none; }
+    tbody tr:hover td { background: transparent; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>角色可访问模块配置表</h1>
+  <div class="sub">
+    重庆康驰物业 · 公园置尚工程管理系统　|　生成日期：2026-09-18（第 3 版）　|　
+    状态：<b>已生效，待复核</b>　|　数据库备份：<code>data.db.bak-20260918-111858</code>
+  </div>
+
+  <h2>一、变更摘要</h2>
+  <div class="summary">
+    <div class="card"><div class="t">管理员</div><div class="v">20 / 20 项</div><div class="d">模块满配 · 权限 9 项</div></div>
+    <div class="card"><div class="t">工程主管</div><div class="v">18 / 20 项</div><div class="d">模块 +2 · 权限 5 项</div></div>
+    <div class="card"><div class="t">工程班长</div><div class="v">11 / 20 项</div><div class="d">模块不变 · <b>权限 +签名</b></div></div>
+    <div class="card"><div class="t">综合维修工</div><div class="v">8 / 20 项</div><div class="d">模块 +1 · <b>权限 +编辑</b></div></div>
+  </div>
+
+  <h2>二、模块配置矩阵</h2>
+  <div class="legend">
+    <span><i class="dot-on">●</i> 已开放（原有）</span>
+    <span><i class="dot-new">▲</i> 本次新增</span>
+    <span><i class="dot-off">—</i> 未开放（导航隐藏 + 页面拦截）</span>
+    <span><i class="dot-tbd">?</i> 待复核确认</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="grp">分组</th>
+        <th style="text-align:left">模块名称</th>
+        <th style="text-align:left">模块标识</th>
+        <th style="width:70px">管理员</th>
+        <th style="width:76px">工程主管</th>
+        <th style="width:76px">工程班长</th>
+        <th style="width:86px">综合维修工</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="rowgrp">
+        <td class="grp">工作台</td><td class="name">仪表盘</td><td class="code">m_dashboard</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td>
+      </tr>
+
+      <tr class="rowgrp">
+        <td class="grp" rowspan="6">填报</td><td class="name">日计划填报</td><td class="code">m_daily_plan</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td>
+      </tr>
+      <tr><td class="name">周计划填报</td><td class="code">m_weekly_plan</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="no">—</td></tr>
+      <tr><td class="name">日报表填报</td><td class="code">m_report</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td></tr>
+      <tr><td class="name">计划周报</td><td class="code">m_weekly_rpt</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="no">—</td></tr>
+      <tr><td class="name">报表浏览</td><td class="code">m_browse</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td></tr>
+      <tr><td class="name">物资申购</td><td class="code">m_purchase</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="new">▲</td></tr>
+
+      <tr class="rowgrp">
+        <td class="grp" rowspan="6">管理</td><td class="name">历史记录</td><td class="code">m_reports</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td>
+      </tr>
+      <tr><td class="name">审批管理</td><td class="code">m_approval</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="no">—</td><td class="no">—</td></tr>
+      <tr><td class="name">物资管理</td><td class="code">m_purchase_mgmt</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="no">—</td><td class="no">—</td></tr>
+      <tr><td class="name">分析空间</td><td class="code">m_analysis</td>
+        <td class="new">▲</td><td class="new">▲</td><td class="no">—</td><td class="no">—</td></tr>
+      <tr><td class="name">任务看板</td><td class="code">m_tasks</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="no">—</td></tr>
+      <tr><td class="name">项目管理</td><td class="code">m_projects</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="tbd">?</td><td class="no">—</td></tr>
+
+      <tr class="rowgrp">
+        <td class="grp" rowspan="7">系统设置</td><td class="name">人员管理</td><td class="code">m_members</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="no">—</td><td class="no">—</td>
+      </tr>
+      <tr><td class="name">部门管理</td><td class="code">m_departments</td>
+        <td class="yes">●</td><td class="tbd">?</td><td class="no">—</td><td class="no">—</td></tr>
+      <tr><td class="name">用户角色</td><td class="code">m_roles</td>
+        <td class="yes">●</td><td class="new">▲</td><td class="no">—</td><td class="no">—</td></tr>
+      <tr><td class="name">系统参数</td><td class="code">m_settings</td>
+        <td class="yes">●</td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+      <tr><td class="name">附件管理</td><td class="code">m_files</td>
+        <td class="yes">●</td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+      <tr><td class="name">关于我们</td><td class="code">m_about</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td></tr>
+      <tr><td class="name">个人中心</td><td class="code">m_me</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>矩阵中的 ? 表示待确认项</b>
+    <ul>
+      <li><b>工程班长 · 项目管理</b> —— 此前被取消，本次未擅自恢复（详见第六节 ③）</li>
+      <li><b>工程主管 · 部门管理</b> —— 建议收回（部门编制归管理员掌握），但未确认，暂留</li>
+    </ul>
+  </div>
+
+  <h2>三、变更明细</h2>
+  <table>
+    <thead>
+      <tr><th class="grp" style="width:100px">角色</th><th style="text-align:left">新增模块</th><th style="width:50px">原</th><th style="width:50px">现</th><th style="text-align:left;width:210px">动作权限变更</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="grp">管理员</td><td class="name">分析空间</td><td>19</td><td><b>20</b></td><td class="no">—（原本已满配）</td></tr>
+      <tr><td class="grp">工程主管</td><td class="name">分析空间、用户角色</td><td>16</td><td><b>18</b></td><td class="no">—</td></tr>
+      <tr><td class="grp">工程班长</td><td class="name" style="color:#999">（无变更）</td><td>11</td><td>11</td><td class="new">＋ 签名（4 → 5 项）</td></tr>
+      <tr><td class="grp">综合维修工</td><td class="name">物资申购</td><td>7</td><td><b>8</b></td><td class="new">＋ 新增、编辑（2 → 4 项）</td></tr>
+    </tbody>
+  </table>
+
+  <h2>四、动作级权限（本次已接入按钮）</h2>
+  <table>
+    <thead>
+      <tr>
+        <th class="grp" style="width:110px">角色</th>
+        <th>查看</th><th>新增</th><th>编辑</th><th>删除</th><th>导入</th><th>导出</th><th>审批</th><th>签名</th><th>管理</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="grp">管理员</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td></tr>
+      <tr><td class="grp">工程主管</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="no">—</td>
+        <td class="no">—</td><td class="yes">●</td><td class="yes">●</td><td class="no">—</td><td class="no">—</td></tr>
+      <tr><td class="grp">工程班长</td>
+        <td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="no">—</td>
+        <td class="no">—</td><td class="yes">●</td><td class="no">—</td><td class="new">▲</td><td class="no">—</td></tr>
+      <tr><td class="grp">综合维修工</td>
+        <td class="yes">●</td><td class="new">▲</td><td class="new">▲</td><td class="no">—</td>
+        <td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="yes">●</td><td class="no">—</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>本次改造：动作级权限已真正生效</b>
+    改造前，这 9 个权限点只被「用户角色」界面记录和保存，<b>业务页面从不读取</b> —— 即勾了「新增」，按钮照样显示。
+    现已接入 <b>63 处</b>按钮（新增 / 编辑 / 删除 / 导入 / 导出 / 审批 / 签名），无权限时按钮自动隐藏。
+    <ul>
+      <li>隐藏方式为 <code>display:none</code>，<b>不移除节点</b>，因此不会导致页面脚本取不到元素而报错。</li>
+      <li>表单内部的细粒度按钮（移除成员、增删明细行、删除附件）<b>不单独受控</b> —— 它们已由"能否进入编辑表单"间接保护。</li>
+      <li><b>工程班长</b>（本次 ▲）：补「签名」。班长本就负责填日报表，此前无签名权，签不了「填报人签名」。</li>
+      <li><b>综合维修工</b>（本次 ▲）：补「编辑」。此前工人看得到「继续编辑」「修改并重新提交」的位置却点不到，草稿与被驳回的记录均无法修改。
+          顺带说明：<code>daily-plan.js</code> 的原始设计注释里，日计划填报人本就是
+          <b>「管理员 / 工程主管 / 工程维修工」</b>，draft / pending / rejected 三态均可编辑 —— 补上「编辑」后反而回归了原设计。</li>
+    </ul>
+  </div>
+
+  <h2>五、各角色实际可见的操作按钮</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="text-align:left;width:110px">页面</th>
+        <th style="text-align:left">管理员</th>
+        <th style="text-align:left">工程主管</th>
+        <th style="text-align:left">工程班长</th>
+        <th style="text-align:left">综合维修工</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="name">日计划填报</td>
+        <td class="name">提交 / 保存 / 通过 / 驳回 / 修改重提 / 删除</td>
+        <td class="name">提交 / 保存 / 通过 / 驳回 / 修改重提</td>
+        <td class="name">提交 / 保存 / 修改重提</td>
+        <td class="name">提交 / 保存 / <b>修改重提</b></td>
+      </tr>
+      <tr>
+        <td class="name">日报表填报</td>
+        <td class="name">提交 / 保存 / 填报人签名 / 审批通过并签名 / 驳回 / 导出 / 删除</td>
+        <td class="name">提交 / 保存 / 审批通过并签名 / 驳回 / 导出</td>
+        <td class="name">提交 / 保存 / 导出 / <b>填报人签名</b></td>
+        <td class="name">提交 / 保存 / 填报人签名</td>
+      </tr>
+      <tr>
+        <td class="name">周计划填报</td>
+        <td class="name">提交 / 保存 / 修改重提</td>
+        <td class="name">提交 / 保存 / 修改重提</td>
+        <td class="name">提交 / 保存 / 修改重提</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+      </tr>
+      <tr>
+        <td class="name">物资申购</td>
+        <td class="name">提交 / 保存 / 通过 / 驳回 / 导出 / 继续编辑</td>
+        <td class="name">提交 / 保存 / 通过 / 驳回 / 导出 / 继续编辑</td>
+        <td class="name">提交 / 保存 / 导出 / 继续编辑</td>
+        <td class="name">提交 / 保存 / <b>继续编辑</b></td>
+      </tr>
+      <tr>
+        <td class="name">审批管理</td>
+        <td class="name">审批 / 通过 / 驳回</td>
+        <td class="name">审批 / 通过 / 驳回</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+      </tr>
+      <tr>
+        <td class="name">物资管理</td>
+        <td class="name">通过 / 驳回 / 导出</td>
+        <td class="name">通过 / 驳回 / 导出</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+      </tr>
+      <tr>
+        <td class="name">任务看板 / 项目管理</td>
+        <td class="name">新建 / 编辑 / 删除</td>
+        <td class="name">新建 / 编辑</td>
+        <td class="name">新建 / 编辑</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+      </tr>
+      <tr>
+        <td class="name">人员管理</td>
+        <td class="name">新增 / 编辑 / 重置密码 / 删除</td>
+        <td class="name">新增 / 编辑 / 重置密码</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+      </tr>
+      <tr>
+        <td class="name">部门管理</td>
+        <td class="name">新增 / 编辑 / 删除</td>
+        <td class="name">新增 / 编辑</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+      </tr>
+      <tr>
+        <td class="name">用户角色</td>
+        <td class="name">新增 / 编辑 / 删除</td>
+        <td class="name">只读查看</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+        <td class="name" style="color:#c7ced3">（无此模块）</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="sub" style="margin-top:6px">
+    说明：日报表的签名已拆为两个独立动作 ——
+    <b>「✍ 填报人签名」</b>（权限 <code>p_sign</code>，仅记录签名与时间，<b>不改变审批状态</b>，草稿 / 待审批 / 已驳回均可签）
+    与 <b>「✓ 审批通过并签名」</b>（权限 <code>p_approve</code>，仅在"待审批"时出现，签完置为"已签名 / 审批通过"）。
+    改造前这两者是同一个按钮，签完即变「审批通过」，导致"填报人签名"与"审批"混为一谈。
+  </p>
+
+  <div class="note">
+    <b>「用户角色」页已收口为：主管只读、管理员可改</b>
+    把该模块开放给工程主管的同时，补上了两层防护：
+    <ul>
+      <li><b>后端</b>：<code>/api/roles</code> 的写入（新增 / 修改 / 删除）已加管理员校验，非管理员请求返回 403。
+          此前该接口<b>没有任何身份校验</b>，任何能进入页面的账号都可修改任意角色、给自己追加模块（自我提权）。</li>
+      <li><b>前端</b>：主管进入角色页时，「+ 添加角色」「编辑」「删除」入口不显示，页面标注"只读查看"，权限勾选框禁用。</li>
+    </ul>
+  </div>
+
+  <h2>六、决策记录与遗留事项</h2>
+  <table>
+    <thead>
+      <tr><th style="width:40px">#</th><th style="text-align:left;width:230px">事项</th><th style="text-align:left">结论 / 说明</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>①</td>
+        <td class="name">综合维修工「签名」权限</td>
+        <td class="name" style="text-align:left">
+          <b>已决策：保留。</b>
+          日报表签名已拆为「填报人签名」(<code>p_sign</code>) 与「审批通过并签名」(<code>p_approve</code>)，
+          工人只有前者 —— 他签的是"本人已填报"，<b>不再具备给自己的报表审批通过的能力</b>。<br>
+          <span style="color:#666">附带：工程班长本次补上了「签名」，因为他同样要填日报表。</span>
+        </td>
+      </tr>
+      <tr>
+        <td>②</td>
+        <td class="name">综合维修工「编辑」权限</td>
+        <td class="name" style="text-align:left">
+          <b>已决策：开放（本次变更）。</b>
+          解锁「继续编辑」（物资申购 · 我的申购）与「修改并重新提交」（日计划被驳回后）。<br>
+          逐入口核查结论：<b>未发现可编辑他人记录的路径</b> —— 物资申购列表只列本人记录；
+          报表浏览页的「保存修改」入口由审批人角色判定控制（仅管理员 / 工程主管可见），工人到不了；
+          「历史记录」页只有新建与删除，无编辑入口。<br>
+          <span style="color:#666">另外，<code>daily-plan.js</code> 原有设计注释即写明填报人为 admin / lead / worker，
+          draft、pending、rejected 三态可编辑 —— 补上「编辑」属回归原设计。</span>
+        </td>
+      </tr>
+      <tr>
+        <td>③</td>
+        <td class="name">工程班长「项目管理」是否恢复</td>
+        <td class="name" style="text-align:left">
+          <b>仍待确认。</b>
+          该模块此前被取消，本次未擅自恢复。取消后班长在「任务看板」里可能选不到项目关联。
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>七、生效方式</h2>
+  <ul>
+    <li><b>模块与权限配置</b>——已直接写入数据库，<b>无需重启服务</b>；对已登录用户刷新页面即生效（每次打开页面都会重新拉取配置），无需重新登录。</li>
+    <li><b>导航表现</b>——未开放的模块在左侧导航中不显示；直接输入网址访问会被拦截并跳回工作台。</li>
+    <li><b>管理员兜底</b>——管理员角色始终全部放行，即使误删全部勾选也不会被锁在系统外。</li>
+    <li><b>⚠ 日报表「填报人签名」需要重启服务</b>——该功能新增了数据表字段，属于后端改动。
+        服务未重启时，签名保存会被前端拦截并提示"请重启服务后重试"，不会出现"看起来签上了其实没存"的情况。</li>
+  </ul>
+
+  <div class="foot">
+    复核方式：登录系统 →「系统设置 → 用户角色」→ 逐一点开各角色，核对<b>「权限配置」</b>与<b>「可访问模块」</b>两处勾选是否与本表一致。<br>
+    程序化复核：项目根目录 <code>_perm_check.py</code> —— 读取数据库实际权限 + 扫描全部按钮，推演各角色可见性并核对预期
+    （用法：<code>python _perm_check.py</code>，可跟角色 key 只查其一）。<br>
+    如需回退：将 <code>server/data.db.bak-20260918-111858</code> 覆盖回 <code>server/data.db</code> 后刷新页面即可。
+  </div>
+
+</div>
+</body>
+</html>

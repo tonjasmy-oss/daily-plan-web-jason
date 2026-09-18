@@ -448,20 +448,20 @@ async function initDailyPlanPage() {
     var actions = '';
     if (canSubmit()) {
       actions =
-        '<button class="btn btn-primary btn-lg" id="btnSubmit">提交审批</button>' +
-        '<button class="btn btn-default btn-lg" id="btnSaveDraft">保存草稿</button>';
+        '<button class="btn btn-primary btn-lg" id="btnSubmit" data-perm="p_create">提交审批</button>' +
+        '<button class="btn btn-default btn-lg" id="btnSaveDraft" data-perm="p_create">保存草稿</button>';
     } else if (st === 'pending') {
       if (DP_APPROVE_ROLES.indexOf(user.role) >= 0) {
         actions =
           '<button class="btn btn-default btn-lg" id="btnAppend">+ 追加工作内容</button>' +
-          '<button class="btn btn-success btn-lg" id="btnApprove">✓ 通过</button>' +
-          '<button class="btn btn-danger btn-lg" id="btnReject">驳回</button>';
+          '<button class="btn btn-success btn-lg" id="btnApprove" data-perm="p_approve">✓ 通过</button>' +
+          '<button class="btn btn-danger btn-lg" id="btnReject" data-perm="p_approve">驳回</button>';
       } else {
         actions = '<button class="btn btn-default btn-lg" disabled>等待审批中…</button>';
       }
     } else if (st === 'rejected') {
       actions =
-        '<button class="btn btn-primary btn-lg" id="btnReopen">修改并重新提交</button>';
+        '<button class="btn btn-primary btn-lg" id="btnReopen" data-perm="p_edit">修改并重新提交</button>';
     } else if (st === 'approved') {
       actions = '<span class="approval-info-text">✓ 已审批通过 · 审批人 ' + esc(form.approver || '-') + ' · ' + esc(formatDateTime(form.approved_at)) + '</span>';
     }
@@ -504,7 +504,7 @@ async function initDailyPlanPage() {
         '<div class="section-header-row">' +
           '<h3 style="margin:0;">计划工作内容 <span class="sec-meta">填写后点击"同步"可一键应用本条字段到所有任务</span></h3>' +
           (editable ? '<div class="dp-section-actions">' +
-            '<button class="btn-link" id="btnAddTask">+ 添加任务</button>' +
+            '<button class="btn-link" id="btnAddTask" data-perm="p_create">+ 添加任务</button>' +
           '</div>' : (canAppend() ? '<div class="dp-section-actions">' +
             '<button class="btn-link" id="btnAppendInline">+ 追加工作内容</button>' +
           '</div>' : '')) +
@@ -536,7 +536,7 @@ async function initDailyPlanPage() {
       /* 操作按钮 */
       '<div class="report-actions">' + actions + '</div>' +
       '<div class="report-actions">' +
-        '<button class="btn btn-danger-outline btn-lg" id="btnDelete">' + rpIconTrash() + ' 删除记录</button>' +
+        '<button class="btn btn-danger-outline btn-lg" id="btnDelete" data-perm="p_delete">' + rpIconTrash() + ' 删除记录</button>' +
       '</div>';
 
     bindEvents();

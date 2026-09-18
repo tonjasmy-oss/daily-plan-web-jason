@@ -21,7 +21,7 @@ async function initDepartmentsPage() {
     pageHtml:
       '<nav class="breadcrumb"><a href="dashboard.html">工作台</a><span class="sep">/</span><a href="settings.html">系统设置</a><span class="sep">/</span><span>部门管理</span></nav>' +
       '<div class="page-header"><div><h2>部门管理</h2><div class="page-sub">维护工程部门结构与人员编制</div></div>' +
-      '<div class="page-actions"><button class="btn-primary" id="dNew">+ 添加部门</button></div></div>' +
+      '<div class="page-actions"><button class="btn-primary" id="dNew" data-perm="p_create">+ 添加部门</button></div></div>' +
       '<div id="dList"></div>'
   });
 
@@ -38,8 +38,8 @@ async function initDepartmentsPage() {
           '<td class="muted">' + esc(d.code || '-') + '</td>' +
           '<td class="muted">' + esc(d.description || '-') + '</td>' +
           '<td class="muted">' + esc((d.created_at || '').slice(0, 10)) + '</td>' +
-          '<td><button class="btn-ghost" data-edit="' + d._id + '">编辑</button> ' +
-          '<button class="btn-danger" data-del="' + d._id + '">删除</button></td>' +
+          '<td><button class="btn-ghost" data-edit="' + d._id + '" data-perm="p_edit">编辑</button> ' +
+          '<button class="btn-danger" data-del="' + d._id + '" data-perm="p_delete">删除</button></td>' +
           '</tr>';
       }).join('') +
       '</tbody></table></div>';

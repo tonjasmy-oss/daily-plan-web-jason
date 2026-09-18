@@ -17,3 +17,6 @@ deploy-cloud.sh text eol=lf
 *.ttf binary
 *.zip binary
 *.gz binary
+*.docx binary
+*.xlsx binary
+*.pptx binary

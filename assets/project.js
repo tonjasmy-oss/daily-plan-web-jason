@@ -41,8 +41,8 @@ async function initProjectDetailPage() {
           '</div>' +
         '</div>' +
         (canManage() ? '<div class="detail-actions">' +
-          '<button class="btn btn-primary" id="btnAddTask">+ 新建任务</button>' +
-          '<button class="btn btn-default" id="btnEdit">编辑项目</button>' +
+          '<button class="btn btn-primary" id="btnAddTask" data-perm="p_create">+ 新建任务</button>' +
+          '<button class="btn btn-default" id="btnEdit" data-perm="p_edit">编辑项目</button>' +
         '</div>' : '') +
       '</div>' +
       '<div class="project-progress-card">' +

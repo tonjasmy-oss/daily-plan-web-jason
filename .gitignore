@@ -45,6 +45,7 @@ _simulate_*.js
 _http_check_*.js
 _smoke_test.js
 _login_test.js
+_perm_check.py
 
 # 日志
 *.log
