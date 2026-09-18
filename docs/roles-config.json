@@ -1,0 +1,118 @@
+{
+  "_comment": "Role modules + permissions snapshot. Applied to the cloud DB by docs/online-update.sh.",
+  "_exported_at": "2026-09-18",
+  "roles": {
+    "admin": {
+      "name": "管理员",
+      "sort_order": 1,
+      "modules": [
+        "m_dashboard",
+        "m_daily_plan",
+        "m_weekly_plan",
+        "m_report",
+        "m_weekly_rpt",
+        "m_browse",
+        "m_purchase",
+        "m_reports",
+        "m_approval",
+        "m_purchase_mgmt",
+        "m_analysis",
+        "m_tasks",
+        "m_projects",
+        "m_members",
+        "m_departments",
+        "m_roles",
+        "m_settings",
+        "m_files",
+        "m_about",
+        "m_me"
+      ],
+      "permissions": [
+        "p_view",
+        "p_create",
+        "p_edit",
+        "p_delete",
+        "p_import",
+        "p_export",
+        "p_approve",
+        "p_sign",
+        "p_admin"
+      ]
+    },
+    "lead": {
+      "name": "工程主管",
+      "sort_order": 2,
+      "modules": [
+        "m_dashboard",
+        "m_daily_plan",
+        "m_weekly_plan",
+        "m_report",
+        "m_weekly_rpt",
+        "m_browse",
+        "m_purchase",
+        "m_reports",
+        "m_approval",
+        "m_purchase_mgmt",
+        "m_analysis",
+        "m_tasks",
+        "m_projects",
+        "m_members",
+        "m_departments",
+        "m_roles",
+        "m_about",
+        "m_me"
+      ],
+      "permissions": [
+        "p_view",
+        "p_create",
+        "p_edit",
+        "p_export",
+        "p_approve"
+      ]
+    },
+    "foreman": {
+      "name": "工程班长",
+      "sort_order": 3,
+      "modules": [
+        "m_dashboard",
+        "m_daily_plan",
+        "m_weekly_plan",
+        "m_report",
+        "m_weekly_rpt",
+        "m_browse",
+        "m_purchase",
+        "m_reports",
+        "m_tasks",
+        "m_about",
+        "m_me"
+      ],
+      "permissions": [
+        "p_view",
+        "p_create",
+        "p_edit",
+        "p_export",
+        "p_sign"
+      ]
+    },
+    "worker": {
+      "name": "综合维修工",
+      "sort_order": 4,
+      "modules": [
+        "m_dashboard",
+        "m_daily_plan",
+        "m_report",
+        "m_browse",
+        "m_purchase",
+        "m_reports",
+        "m_about",
+        "m_me"
+      ],
+      "permissions": [
+        "p_view",
+        "p_create",
+        "p_edit",
+        "p_sign"
+      ]
+    }
+  }
+}
