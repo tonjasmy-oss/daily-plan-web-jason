@@ -283,6 +283,73 @@ function exportWeeklyPlanToExcel(plan, members, onDone) {
   if (onDone) onDone();
 }
 
+/* ---------- 计划周报导出 (审批管理「查看」/ 报表浏览通用) ---------- */
+function exportWeeklyReportToExcel(rec, onDone) {
+  if (typeof XLSX === 'undefined') {
+    toast('Excel 组件未加载', 'error');
+    if (onDone) onDone();
+    return;
+  }
+  function statusText() {
+    return ({ draft: '草稿', pending: '待审批', approved: '已通过', rejected: '已驳回' })[rec.status] || rec.status || '未知';
+  }
+  function name(id) {
+    if (!id) return '-';
+    var m = (typeof getMember === 'function') ? getMember(id) : null;
+    return (m && m.name) ? m.name : String(id);
+  }
+  function names(ids) {
+    if (!Array.isArray(ids)) return '-';
+    return ids.map(name).filter(Boolean).join('、') || '-';
+  }
+
+  var wsData = [];
+  wsData.push([rec.title || '工程部计划周报']);
+  wsData.push(['']);
+  wsData.push(['周期', [rec.week_start, rec.week_end].filter(Boolean).join(' ~ ')]);
+  wsData.push(['状态', statusText()]);
+  wsData.push(['提交人', rec.submitter || '-']);
+  if (rec.submitted_at) wsData.push(['提交时间', formatDateTime(rec.submitted_at)]);
+  wsData.push(['审批人', rec.approver || '-']);
+  if (rec.status === 'approved' && rec.approved_at) wsData.push(['审批时间', formatDateTime(rec.approved_at)]);
+  if (rec.status === 'rejected') {
+    if (rec.rejected_at) wsData.push(['驳回时间', formatDateTime(rec.rejected_at)]);
+    if (rec.rejected_reason) wsData.push(['驳回原因', rec.rejected_reason]);
+  }
+  wsData.push(['']);
+  wsData.push(['本周工作摘要']);
+  wsData.push([rec.summary || '无']);
+  /* 审批补充事项 —— 与详情页 pbAppendList 同口径 (仅取 appended 项) */
+  var items = (rec.items || []).filter(function (t) { return t && t.appended && ((t.content || t.title || '').trim()); });
+  if (items.length) {
+    wsData.push(['']);
+    wsData.push(['审批补充事项（共 ' + items.length + ' 条）']);
+    wsData.push(['#', '内容', '工作要求', '实施人员', '完成时间']);
+    items.forEach(function (t, i) {
+      var time = [t.startTime, t.endTime].filter(Boolean).join(' ~ ');
+      wsData.push([i + 1, t.content || t.title || '', t.requirement || '', names(t.members), time]);
+    });
+  }
+  wsData.push(['']);
+  wsData.push(['导出时间', formatDateTime(new Date())]);
+
+  var ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{ wch: 16 }, { wch: 60 }];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '计划周报');
+
+  var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array', compression: true });
+  var blob = new Blob([wbout], { type: 'application/octet-stream' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = '计划周报_' + (rec.week_start || formatDateStr(new Date())) + '.xlsx';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Excel 已导出');
+  if (onDone) onDone();
+}
+
 window.exportReportToExcel = exportReportToExcel;
 window.exportDailyPlanToExcel = exportDailyPlanToExcel;
 window.exportWeeklyPlanToExcel = exportWeeklyPlanToExcel;

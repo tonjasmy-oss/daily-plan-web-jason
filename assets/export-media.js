@@ -82,6 +82,7 @@ function pbxText(v) { return (v === undefined || v === null || v === '') ? '—'
 function pbxPlanDate(rec, tab) {
   if (!rec) return '';
   if (tab === 'weekly') return rec.startDate || '';
+  if (tab === 'wr') return rec.week_start || '';
   if (tab === 'daily') return rec.plan_date || rec.date || '';
   return rec.plan_date || rec.date || '';
 }
@@ -95,12 +96,16 @@ function pbxDocTitle(rec, tab) {
     return '工程部周计划工作安排' + ((s || e) ? '（' + s + ' ~ ' + e + '）' : '');
   }
   if (tab === 'report') return reportDisplayTitle(rec);
+  if (tab === 'wr') {
+    var wws = rec.week_start || '', wwe = rec.week_end || '';
+    return (rec.title || '工程部计划周报') + ((wws || wwe) ? '（' + wws + ' ~ ' + wwe + '）' : '');
+  }
   return '报表';
 }
 /* kind: 'image' | 'pdf' | 'xlsx' */
 function pbxDocFilename(rec, tab, kind) {
   var ext = kind === 'pdf' ? 'pdf' : (kind === 'xlsx' ? 'xlsx' : 'png');
-  var base = tab === 'weekly' ? '周计划工作安排' : (tab === 'report' ? '日报表' : '日计划工作安排');
+  var base = tab === 'weekly' ? '周计划工作安排' : tab === 'report' ? '日报表' : tab === 'wr' ? '计划周报' : '日计划工作安排';
   var d = pbxPlanDate(rec, tab) || formatDateStr(new Date());
   return base + '_' + d + '.' + ext;
 }
@@ -280,9 +285,36 @@ function pbxBodyReport(rec) {
     '</div>';
 }
 
+function pbxBodyWeeklyReport(rec) {
+  var st = rec.status || 'draft';
+  var meta = pbxMetaTable([
+    ['周期', esc([rec.week_start, rec.week_end].filter(Boolean).join(' ~ '))],
+    ['状态', esc(PBX_DAILY_STATUS[st] || st)],
+    ['提交人', esc(rec.submitter)],
+    ['提交时间', esc(rec.submitted_at ? formatDateTime(rec.submitted_at) : '')],
+    ['审批人', esc(rec.approver)],
+    [st === 'rejected' ? '驳回时间' : '审批时间',
+      esc(formatDateTime(st === 'rejected' ? rec.rejected_at : rec.approved_at))],
+    st === 'rejected' ? ['驳回原因', esc(rec.rejected_reason)] : null
+  ]);
+  var items = (rec.items || []).filter(function (t) { return t && t.appended && ((t.content || t.title || '').trim()); });
+  var rows = items.map(function (t, i) {
+    var time = [t.startTime, t.endTime].filter(Boolean).join(' ~ ');
+    return [String(i + 1), esc(t.content || t.title || ''), esc(t.requirement || ''), esc(pbxNames(t.members)), esc(time)];
+  });
+  return meta +
+    pbxHeading('本周工作摘要') +
+    '<div class="pbx-remarks">' + (esc(rec.summary) || '无') + '</div>' +
+    (rows.length
+      ? pbxHeading('审批补充事项（共 ' + rows.length + ' 条）') +
+        pbxDataTable(['#', '内容', '工作要求', '实施人员', '完成时间'], rows)
+      : '');
+}
+
 function pbxDocHtml(rec, tab) {
   var body = tab === 'weekly' ? pbxBodyWeekly(rec)
     : tab === 'report' ? pbxBodyReport(rec)
+    : tab === 'wr' ? pbxBodyWeeklyReport(rec)
     : pbxBodyDaily(rec);
   return '<style>' + PBX_CSS + '</style>' +
     '<div class="pbx-doc">' +

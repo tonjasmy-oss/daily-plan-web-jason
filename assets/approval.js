@@ -191,7 +191,7 @@ async function initApprovalPage() {
         if (!it) return;
         window.pbRefreshList = paint;
         window.pbAfterDecide = function () { pbCloseDetail(); paint(); };
-        pbOpenDetail(it.rec, it.tab, { noExport: true, keepUrl: true });
+        pbOpenDetail(it.rec, it.tab, { keepUrl: true });
       });
     });
   }

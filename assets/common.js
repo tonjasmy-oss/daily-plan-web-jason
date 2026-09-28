@@ -282,29 +282,122 @@ var WORK_TYPE = {};
 
 var _syncTimers = {};   /* key -> setTimeout 句柄（PUT 防抖合并） */
 var _pendingData = {};  /* key -> 待提交的最新数据 */
-var _chain = Promise.resolve();  /* 每条记录的请求按序执行 */
+var _chains = {};       /* entity(如 projects) -> Promise 链：保证同实体写顺序，不同实体并行 */
 
-function _syncNow(method, url, body) {
-  _chain = _chain.then(function () {
-    return fetch(url, {
-      method: method,
-      credentials: 'same-origin',
-      headers: body ? { 'Content-Type': 'application/json' } : {},
-      body: body ? JSON.stringify(body) : undefined
-    }).then(function (r) {
-      if (r.status === 401) {
-        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-        location.href = 'login.html';
-        throw new Error('未登录');
-      }
-      return r.json();
-    }).catch(function (e) {
-      if (e && e.message === '未登录') throw e;
-      console.error('数据同步失败', method, url, e);
-      toast('数据同步失败，请确认服务已启动', 'error');
-    });
+/* ============================================================
+ * 离线写队列 + 失败自动重试 (P0-1)
+ * 原则：不改后端、不改页面调用行为。
+ *  - 所有写请求(POST/PUT/DELETE)先落本地 Outbox(localStorage) 再发送，
+ *    刷新 / 崩溃 / 断网都不会静默丢写；
+ *  - 发送失败按指数退避自动重试(1s→2s→4s…封顶30s)，超出次数转 failed
+ *    并等待“网络恢复 / 下次启动”重放；
+ *  - 按实体分链，单一慢请求不再阻塞全部写入；
+ *  - 401 跳登录页并停止该请求重试；window 'online' / bootstrap 成功后重放。
+ * ============================================================ */
+var OUTBOX_KEY = 'eng_ms_outbox_v1';
+var _outbox = _loadOutbox();
+var MAX_ATTEMPTS = 6;        /* 自动重试上限（之后转 failed 等待重放） */
+var BASE_BACKOFF = 1000;     /* 初始退避 1s */
+var MAX_BACKOFF = 30000;     /* 退避上限 30s */
+
+function _entityOf(url) {
+  var m = /\/api\/([^\/\?]+)/.exec(url || '');
+  return m ? m[1] : 'misc';
+}
+function _loadOutbox() {
+  try {
+    var raw = localStorage.getItem(OUTBOX_KEY);
+    var arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+function _persistOutbox() {
+  try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(_outbox)); }
+  catch (e) { console.warn('Outbox 持久化失败（可能超出本地容量）', e); }
+}
+function _outboxAdd(method, url, body) {
+  var item = {
+    id: uuid(), method: method, url: url, body: body,
+    entity: _entityOf(url), attempt: 0,
+    status: 'pending',          /* pending | sending | waiting | done | failed | auth_error */
+    nextAt: 0, lastError: '', createdAt: new Date().toISOString()
+  };
+  _outbox.push(item); _persistOutbox();
+  return item;
+}
+function _outboxRemove(id) {
+  var i = _outbox.findIndex(function (x) { return x.id === id; });
+  if (i >= 0) { _outbox.splice(i, 1); _persistOutbox(); }
+}
+function _fetchRaw(method, url, body) {
+  return fetch(url, {
+    method: method, credentials: 'same-origin',
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined
+  }).then(function (r) {
+    if (r.status === 401) {
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      location.href = 'login.html';
+      throw new Error('未登录');
+    }
+    return r.json();
   });
-  return _chain;
+}
+/* 单次 HTTP 尝试；成功移出 Outbox，失败安排退避重试或转终态 */
+function _attempt(item) {
+  item.status = 'sending'; _persistOutbox();
+  return _fetchRaw(item.method, item.url, item.body).then(function (res) {
+    item.status = 'done'; item.res = res; _outboxRemove(item.id);
+    return res;
+  }, function (e) {
+    if (e && e.message === '未登录') {
+      item.status = 'auth_error'; _persistOutbox(); throw e;
+    }
+    item.attempt += 1;
+    item.lastError = String((e && e.message) || e);
+    if (item.attempt >= MAX_ATTEMPTS) {
+      item.status = 'failed'; item.nextAt = 0; _persistOutbox();
+      console.error('写请求重试超限，转入待重放队列', item.method, item.url, item.lastError);
+      throw new Error('重试超限: ' + item.lastError);
+    }
+    var delay = Math.min(MAX_BACKOFF, BASE_BACKOFF * Math.pow(2, item.attempt - 1));
+    item.nextAt = Date.now() + delay;
+    item.status = 'waiting'; _persistOutbox();
+    return new Promise(function (res) { setTimeout(res, delay); })
+      .then(function () { return _attempt(item); });   /* 退避后递归重试 */
+  });
+}
+/* 每个 item 一个稳定 deferred：重试多次也只 resolve/reject 一次（最终态） */
+function _sendItem(item) {
+  if (!item._deferred) {
+    var d = {};
+    d.p = new Promise(function (res, rej) { d.res = res; d.rej = rej; });
+    item._deferred = d;
+    _attempt(item).then(function (res) { d.res(res); }, function (err) { d.rej(err); });
+  }
+  return item._deferred.p;
+}
+/* 对外写入口：落 Outbox → 入实体链 → 首发出送；返回该 item 的 done promise */
+function _syncNow(method, url, body) {
+  var item = _outboxAdd(method, url, body);
+  var p = _sendItem(item);                 /* 同步建 deferred 并启动首次发送 */
+  var entity = item.entity;
+  if (!_chains[entity]) _chains[entity] = Promise.resolve();
+  _chains[entity] = _chains[entity].then(function () { return p; }).catch(function () {}); /* 链永远 resolved */
+  return p;
+}
+/* 重放 Outbox 中未完成项（启动 / 网络恢复时触发） */
+function _replayOutbox() {
+  _outbox.forEach(function (item) {
+    if (item.status === 'sending' || item.status === 'waiting') return; /* 已有进行中重试 */
+    if (item.status === 'auth_error') return;                          /* 401 待重新登录 */
+    if (item.status === 'done') return;
+    item.attempt = 0; item.nextAt = 0; delete item._deferred;         /* 重置给一轮新机会 */
+    _sendItem(item);
+  });
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', function () { _replayOutbox(); });
 }
 
 /* PUT 防抖 400ms 合并（进度滑块等高频操作）；POST/DELETE 立即发送 */
@@ -354,12 +447,14 @@ function bootstrapDB() {
       DB.settings = res.settings || {};
       DB.loaded = true;
       DB._loading = null;
+      _replayOutbox();           /* 启动成功：重放离线写队列 */
     })
     .catch(function (e) {
       DB._loading = null;
       if (e && e.message === 'file-protocol') throw e;
       console.error('bootstrapDB 失败', e);
       toast('无法连接服务器，请启动 start.bat 后访问 http://localhost:8080', 'error');
+      _replayOutbox();           /* 服务器暂不可达：让 Outbox 自动退避重试自愈 */
       throw e;
     });
   return DB._loading;
@@ -370,155 +465,192 @@ function _findById(arr, id) { return arr.find(function (r) { return r._id === id
 function _findIdx(arr, id) { return arr.findIndex(function (r) { return r._id === id; }); }
 
 /* ============================================================
+ * 通用 CRUD 工厂 (P1-2 重构: 消除 11 组重复样板)
+ * 返回一个 { load, get, create, update, remove } 对象。
+ * 各处再用 createX / loadX / getX / updateX / deleteX 薄包装暴露为全局函数,
+ * 保持原函数名与签名不变, 页面调用方无需改动。
+ *
+ * cfg 字段:
+ *   cacheKey : 'projects'          (DB[cacheKey] 数组)
+ *   api      : '/api/projects'      (基础路径, 增删改拼在该路径后)
+ *   order    : 'push' | 'unshift'  (默认 push; 计划/申购类用 unshift 让新记录置顶)
+ *   idGen    : function(){}        生成 _id (缺省 uuid())
+ *   defaults : function(){ return {...} }  新建记录默认字段
+ *   beforeCreate(rec, data): 合并后、入库/POST 前可改写 rec
+ *   afterCreate(rec):        入库后同步回调 (如同步项目进度)
+ *   beforeUpdate(rec, patch): 返回加工后的 patch (如任务状态变更写 history)
+ *   afterUpdate(rec, patch):  更新后回调
+ *   beforeDelete(rec):       返回 false 可中止删除 (如级联清理)
+ *   afterDelete(rec):         删除后回调 (如同步项目进度)
+ * ============================================================ */
+function makeCrud(cfg) {
+  function list() { return DB[cfg.cacheKey]; }
+  function get(id) { return _findById(DB[cfg.cacheKey], id); }
+
+  function create(data) {
+    data = data || {};
+    var rec = Object.assign({}, (typeof cfg.defaults === 'function' ? cfg.defaults() : {}), data);
+    rec._id = (data && data._id) || (typeof cfg.idGen === 'function' ? cfg.idGen() : uuid());
+    rec.created_at = rec.created_at || new Date().toISOString();
+    if (typeof cfg.beforeCreate === 'function') cfg.beforeCreate(rec, data);
+    if (cfg.order === 'unshift') DB[cfg.cacheKey].unshift(rec);
+    else DB[cfg.cacheKey].push(rec);
+    /* P0-2: POST 后回写服务端 _id / created_at。
+     * 后端当前优先复用客户端 _id (server/app.py: data.get('_id') or gen_id(...)),
+     * 此处回写为"防御 + 向前兼容"——若后端未来改为自生成 id, 前端也能正确对齐。
+     * 失败不阻塞主流程(沿用原 _syncNow 的 catch)。 */
+    _syncNow('POST', cfg.api, rec).then(function (res) {
+      if (res && res.record) {
+        if (res.record._id && res.record._id !== rec._id) rec._id = res.record._id;
+        if (res.record.created_at) rec.created_at = res.record.created_at;
+      }
+    }).catch(function () {});
+    if (typeof cfg.afterCreate === 'function') cfg.afterCreate(rec);
+    return rec;
+  }
+
+  function update(id, patch) {
+    var idx = _findIdx(DB[cfg.cacheKey], id);
+    if (idx < 0) return null;
+    var p = (typeof cfg.beforeUpdate === 'function') ? cfg.beforeUpdate(DB[cfg.cacheKey][idx], patch) : patch;
+    if (p == null) p = patch;
+    DB[cfg.cacheKey][idx] = Object.assign({}, DB[cfg.cacheKey][idx], p, { updated_at: new Date().toISOString() });
+    _syncRecord('PUT', cfg.api + '/' + id, DB[cfg.cacheKey][idx]);
+    if (typeof cfg.afterUpdate === 'function') cfg.afterUpdate(DB[cfg.cacheKey][idx], p);
+    return DB[cfg.cacheKey][idx];
+  }
+
+  function remove(id) {
+    var idx = _findIdx(DB[cfg.cacheKey], id);
+    if (idx < 0) return null;
+    var rec = DB[cfg.cacheKey][idx];
+    if (typeof cfg.beforeDelete === 'function') {
+      var go = cfg.beforeDelete(rec);
+      if (go === false) return null;
+    }
+    DB[cfg.cacheKey] = DB[cfg.cacheKey].filter(function (r) { return r._id !== id; });
+    _syncNow('DELETE', cfg.api + '/' + id);
+    if (typeof cfg.afterDelete === 'function') cfg.afterDelete(rec);
+    return rec;
+  }
+
+  return { load: list, get: get, create: create, update: update, remove: remove };
+}
+
+/* ============================================================
  * 项目 CRUD
  * ============================================================ */
-function loadProjects() { return DB.projects; }
-function getProject(id) { return _findById(DB.projects, id); }
-function createProject(data) {
-  var now = new Date().toISOString();
-  var rec = Object.assign({
-    _id: uuid(),
-    name: '',
-    code: '',
-    description: '',
-    location: '',
-    managerId: '',
-    memberIds: [],
-    startDate: '',
-    endDate: '',
-    status: PROJECT_STATUS.PLANNING,
-    progress: 0,
-    tags: [],
-    created_at: now,
-    updated_at: now
-  }, data);
-  rec._id = rec._id || uuid();
-  DB.projects.push(rec);
-  _syncNow('POST', '/api/projects', rec);
-  return rec;
-}
-function updateProject(id, patch) {
-  var idx = _findIdx(DB.projects, id);
-  if (idx < 0) return null;
-  DB.projects[idx] = Object.assign({}, DB.projects[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/projects/' + id, DB.projects[idx]);
-  return DB.projects[idx];
-}
-function deleteProject(id) {
-  var tasks = DB.tasks.filter(function (t) { return t.projectId === id; });
-  DB.projects = DB.projects.filter(function (r) { return r._id !== id; });
-  DB.tasks = DB.tasks.filter(function (t) { return t.projectId !== id; });
-  _syncNow('DELETE', '/api/projects/' + id);
-  /* 服务器端联删任务；客户端不再逐个发请求 */
-}
+var _crudProjects = makeCrud({
+  cacheKey: 'projects', api: '/api/projects', order: 'push',
+  idGen: function () { return uuid(); },
+  defaults: function () {
+    var now = new Date().toISOString();
+    return {
+      name: '', code: '', description: '', location: '',
+      managerId: '', memberIds: [], startDate: '', endDate: '',
+      status: PROJECT_STATUS.PLANNING, progress: 0, tags: [],
+      created_at: now, updated_at: now
+    };
+  },
+  /* 删除项目时级联清理客户端缓存里的任务 (服务端会联删, 无需逐条同步) */
+  beforeDelete: function (rec) {
+    DB.tasks = DB.tasks.filter(function (t) { return t.projectId !== rec._id; });
+    return true;
+  }
+});
+function loadProjects() { return _crudProjects.load(); }
+function getProject(id) { return _crudProjects.get(id); }
+function createProject(data) { return _crudProjects.create(data); }
+function updateProject(id, patch) { return _crudProjects.update(id, patch); }
+function deleteProject(id) { return _crudProjects.remove(id); }
 
 /* ============================================================
  * 人员 CRUD
  * ============================================================ */
-function loadMembers() { return DB.members; }
-function getMember(id) { return _findById(DB.members, id); }
-function createMember(data) {
-  var now = new Date().toISOString();
-  var rec = Object.assign({
-    _id: uuid(),
-    name: '',
-    role: 'worker',
-    phone: '',
-    workType: '',
-    avatar: '',
-    active: true,
-    joinDate: todayStr(),
-    created_at: now
-  }, data);
-  rec._id = rec._id || uuid();
-  DB.members.push(rec);
-  _syncNow('POST', '/api/members', rec);
-  return rec;
-}
-function updateMember(id, patch) {
-  var idx = _findIdx(DB.members, id);
-  if (idx < 0) return null;
-  DB.members[idx] = Object.assign({}, DB.members[idx], patch);
-  _syncRecord('PUT', '/api/members/' + id, DB.members[idx]);
-  return DB.members[idx];
-}
-function deleteMember(id) {
-  DB.members = DB.members.filter(function (r) { return r._id !== id; });
-  /* 解除项目/任务关联（缓存 + 逐条同步，量小可直接发） */
-  DB.projects.forEach(function (p) {
-    var changed = false;
-    if (p.managerId === id) { p.managerId = ''; changed = true; }
-    if ((p.memberIds || []).indexOf(id) >= 0) {
-      p.memberIds = p.memberIds.filter(function (x) { return x !== id; });
-      changed = true;
-    }
-    if (changed) _syncRecord('PUT', '/api/projects/' + p._id, p);
-  });
-  DB.tasks.forEach(function (t) {
-    if (t.assigneeId === id) {
-      t.assigneeId = '';
-      _syncRecord('PUT', '/api/tasks/' + t._id, t);
-    }
-  });
-  _syncNow('DELETE', '/api/members/' + id);
-}
+var _crudMembers = makeCrud({
+  cacheKey: 'members', api: '/api/members', order: 'push',
+  idGen: function () { return uuid(); },
+  defaults: function () {
+    return {
+      name: '', role: 'worker', phone: '', workType: '', avatar: '',
+      active: true, joinDate: todayStr(), created_at: new Date().toISOString()
+    };
+  },
+  /* 删除人员时解除其在项目/任务里的关联 (缓存 + 逐条同步) */
+  beforeDelete: function (rec) {
+    DB.projects.forEach(function (p) {
+      var changed = false;
+      if (p.managerId === rec._id) { p.managerId = ''; changed = true; }
+      if ((p.memberIds || []).indexOf(rec._id) >= 0) {
+        p.memberIds = p.memberIds.filter(function (x) { return x !== rec._id; });
+        changed = true;
+      }
+      if (changed) _syncRecord('PUT', '/api/projects/' + p._id, p);
+    });
+    DB.tasks.forEach(function (t) {
+      if (t.assigneeId === rec._id) {
+        t.assigneeId = '';
+        _syncRecord('PUT', '/api/tasks/' + t._id, t);
+      }
+    });
+    return true;
+  }
+});
+function loadMembers() { return _crudMembers.load(); }
+function getMember(id) { return _crudMembers.get(id); }
+function createMember(data) { return _crudMembers.create(data); }
+function updateMember(id, patch) { return _crudMembers.update(id, patch); }
+function deleteMember(id) { return _crudMembers.remove(id); }
 
 /* ============================================================
  * 任务 CRUD
  * ============================================================ */
-function loadTasks() { return DB.tasks; }
-function getTask(id) { return _findById(DB.tasks, id); }
-function createTask(data) {
-  var now = new Date().toISOString();
-  var rec = Object.assign({
-    _id: uuid(),
-    projectId: '',
-    title: '',
-    description: '',
-    assigneeId: '',
-    reporterId: '',
-    priority: PRIORITY.NORMAL,
-    status: TASK_STATUS.TODO,
-    startDate: todayStr(),
-    dueDate: '',
-    progress: 0,
-    tags: [],
-    comments: [],
-    history: [{ from: null, to: TASK_STATUS.TODO, ts: now, userId: data.reporterId || '' }],
-    created_at: now,
-    updated_at: now
-  }, data);
-  rec._id = rec._id || uuid();
-  DB.tasks.push(rec);
-  _syncNow('POST', '/api/tasks', rec);
-  if (rec.projectId) syncProjectProgress(rec.projectId);
-  return rec;
-}
-function updateTask(id, patch) {
-  var idx = _findIdx(DB.tasks, id);
-  if (idx < 0) return null;
-  if (patch.status && patch.status !== DB.tasks[idx].status) {
-    var hist = (DB.tasks[idx].history || []).slice();
-    hist.push({
-      from: DB.tasks[idx].status,
-      to: patch.status,
-      ts: new Date().toISOString(),
-      userId: patch._changedBy || ''
-    });
-    patch.history = hist;
-    delete patch._changedBy;
+var _crudTasks = makeCrud({
+  cacheKey: 'tasks', api: '/api/tasks', order: 'push',
+  idGen: function () { return uuid(); },
+  defaults: function () {
+    var now = new Date().toISOString();
+    return {
+      projectId: '', title: '', description: '', assigneeId: '', reporterId: '',
+      priority: PRIORITY.NORMAL, status: TASK_STATUS.TODO,
+      startDate: todayStr(), dueDate: '', progress: 0,
+      tags: [], comments: [], history: [], created_at: now, updated_at: now
+    };
+  },
+  /* 创建时写入首条 history (from:null -> 初始状态), 记录填报人 */
+  beforeCreate: function (rec, data) {
+    rec.history = [{ from: null, to: rec.status || TASK_STATUS.TODO, ts: rec.created_at, userId: (data && data.reporterId) || '' }];
+  },
+  afterCreate: function (rec) {
+    if (rec.projectId) syncProjectProgress(rec.projectId);
+  },
+  /* 状态变更时追加 history; 消费并移除临时字段 _changedBy */
+  beforeUpdate: function (rec, patch) {
+    if (patch.status && patch.status !== rec.status) {
+      var hist = (rec.history || []).slice();
+      hist.push({
+        from: rec.status,
+        to: patch.status,
+        ts: new Date().toISOString(),
+        userId: patch._changedBy || ''
+      });
+      patch = Object.assign({}, patch, { history: hist });
+      delete patch._changedBy;
+    }
+    return patch;
+  },
+  afterUpdate: function (rec) {
+    if (rec.projectId) syncProjectProgress(rec.projectId);
+  },
+  afterDelete: function (rec) {
+    if (rec && rec.projectId) syncProjectProgress(rec.projectId);
   }
-  DB.tasks[idx] = Object.assign({}, DB.tasks[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/tasks/' + id, DB.tasks[idx]);
-  if (DB.tasks[idx].projectId) syncProjectProgress(DB.tasks[idx].projectId);
-  return DB.tasks[idx];
-}
-function deleteTask(id) {
-  var t = getTask(id);
-  DB.tasks = DB.tasks.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/tasks/' + id);
-  if (t && t.projectId) syncProjectProgress(t.projectId);
-}
+});
+function loadTasks() { return _crudTasks.load(); }
+function getTask(id) { return _crudTasks.get(id); }
+function createTask(data) { return _crudTasks.create(data); }
+function updateTask(id, patch) { return _crudTasks.update(id, patch); }
+function deleteTask(id) { return _crudTasks.remove(id); }
 function addTaskComment(id, userId, text) {
   var t = getTask(id);
   if (!t) return null;
@@ -808,211 +940,146 @@ function requireModule(mod) {
 /* ============================================================
  * 日计划填报 CRUD (走 /api/daily-plans)
  * ============================================================ */
-function loadDailyPlans() { return DB.dailyPlans; }
-function getDailyPlan(id) { return _findById(DB.dailyPlans, id); }
-function createDailyPlan(data) {
-  var rec = Object.assign({
-    _id: 'dp_' + uuid(),
-    date: todayStr(), plan_date: todayStr(),
-    status: 'draft', tasks: [], crew: { night: [], rest: [], adjust: [] },
-    remarks: '', submitter: '', approver: '',
-    created_at: new Date().toISOString()
-  }, data);
-  rec._id = rec._id || ('dp_' + uuid());
-  DB.dailyPlans.unshift(rec);
-  _syncNow('POST', '/api/daily-plans', rec);
-  return rec;
-}
-function updateDailyPlan(id, patch) {
-  var idx = _findIdx(DB.dailyPlans, id);
-  if (idx < 0) return null;
-  DB.dailyPlans[idx] = Object.assign({}, DB.dailyPlans[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/daily-plans/' + id, DB.dailyPlans[idx]);
-  return DB.dailyPlans[idx];
-}
-function deleteDailyPlan(id) {
-  DB.dailyPlans = DB.dailyPlans.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/daily-plans/' + id);
-}
+var _crudDailyPlans = makeCrud({
+  cacheKey: 'dailyPlans', api: '/api/daily-plans', order: 'unshift',
+  idGen: function () { return 'dp_' + uuid(); },
+  defaults: function () {
+    return {
+      date: todayStr(), plan_date: todayStr(),
+      status: 'draft', tasks: [], crew: { night: [], rest: [], adjust: [] },
+      remarks: '', submitter: '', approver: '',
+      created_at: new Date().toISOString()
+    };
+  }
+});
+function loadDailyPlans() { return _crudDailyPlans.load(); }
+function getDailyPlan(id) { return _crudDailyPlans.get(id); }
+function createDailyPlan(data) { return _crudDailyPlans.create(data); }
+function updateDailyPlan(id, patch) { return _crudDailyPlans.update(id, patch); }
+function deleteDailyPlan(id) { return _crudDailyPlans.remove(id); }
 
 /* ===== 周计划填报 CRUD ===== */
-function loadWeeklyPlans() { return DB.weeklyPlans; }
-function createWeeklyPlan(data) {
-  var rec = Object.assign({
-    _id: 'wp_' + uuid(),
-    week_start: '', week_end: '', title: '',
-    status: 'draft', content: '', members: [],
-    submitter: '', approver: '',
-    created_at: new Date().toISOString()
-  }, data);
-  DB.weeklyPlans.unshift(rec);
-  _syncNow('POST', '/api/weekly-plans', rec);
-  return rec;
-}
-function updateWeeklyPlan(id, patch) {
-  var idx = _findIdx(DB.weeklyPlans, id);
-  if (idx < 0) return null;
-  DB.weeklyPlans[idx] = Object.assign({}, DB.weeklyPlans[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/weekly-plans/' + id, DB.weeklyPlans[idx]);
-  return DB.weeklyPlans[idx];
-}
-function deleteWeeklyPlan(id) {
-  DB.weeklyPlans = DB.weeklyPlans.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/weekly-plans/' + id);
-}
+var _crudWeeklyPlans = makeCrud({
+  cacheKey: 'weeklyPlans', api: '/api/weekly-plans', order: 'unshift',
+  idGen: function () { return 'wp_' + uuid(); },
+  defaults: function () {
+    return {
+      week_start: '', week_end: '', title: '',
+      status: 'draft', content: '', members: [],
+      submitter: '', approver: '',
+      created_at: new Date().toISOString()
+    };
+  }
+});
+function loadWeeklyPlans() { return _crudWeeklyPlans.load(); }
+function createWeeklyPlan(data) { return _crudWeeklyPlans.create(data); }
+function updateWeeklyPlan(id, patch) { return _crudWeeklyPlans.update(id, patch); }
+function deleteWeeklyPlan(id) { return _crudWeeklyPlans.remove(id); }
 
 /* ===== 计划周报 CRUD ===== */
-function loadWeeklyReports() { return DB.weeklyReports; }
-function createWeeklyReport(data) {
-  var rec = Object.assign({
-    _id: 'wr_' + uuid(),
-    week_start: '', week_end: '', title: '',
-    status: 'draft', summary: '', items: [],
-    submitter: '', approver: '',
-    created_at: new Date().toISOString()
-  }, data);
-  DB.weeklyReports.unshift(rec);
-  _syncNow('POST', '/api/weekly-reports', rec);
-  return rec;
-}
-function updateWeeklyReport(id, patch) {
-  var idx = _findIdx(DB.weeklyReports, id);
-  if (idx < 0) return null;
-  DB.weeklyReports[idx] = Object.assign({}, DB.weeklyReports[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/weekly-reports/' + id, DB.weeklyReports[idx]);
-  return DB.weeklyReports[idx];
-}
-function deleteWeeklyReport(id) {
-  DB.weeklyReports = DB.weeklyReports.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/weekly-reports/' + id);
-}
+var _crudWeeklyReports = makeCrud({
+  cacheKey: 'weeklyReports', api: '/api/weekly-reports', order: 'unshift',
+  idGen: function () { return 'wr_' + uuid(); },
+  defaults: function () {
+    return {
+      week_start: '', week_end: '', title: '',
+      status: 'draft', summary: '', items: [],
+      submitter: '', approver: '',
+      created_at: new Date().toISOString()
+    };
+  }
+});
+function loadWeeklyReports() { return _crudWeeklyReports.load(); }
+function createWeeklyReport(data) { return _crudWeeklyReports.create(data); }
+function updateWeeklyReport(id, patch) { return _crudWeeklyReports.update(id, patch); }
+function deleteWeeklyReport(id) { return _crudWeeklyReports.remove(id); }
 
 /* ===== 物资申购 CRUD ===== */
-function loadPurchases() { return DB.purchases; }
-function createPurchase(data) {
-  var rec = Object.assign({
-    _id: 'pu_' + uuid(),
-    date: todayStr(), name: '', spec: '', unit: '', qty: '',
-    total: 0, items: [], projectId: '',
-    reason: '', status: 'draft',
-    applicant: '', approver: '',
-    created_at: new Date().toISOString()
-  }, data);
-  DB.purchases.unshift(rec);
-  _syncNow('POST', '/api/purchases', rec);
-  return rec;
-}
-function updatePurchase(id, patch) {
-  var idx = _findIdx(DB.purchases, id);
-  if (idx < 0) return null;
-  DB.purchases[idx] = Object.assign({}, DB.purchases[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/purchases/' + id, DB.purchases[idx]);
-  return DB.purchases[idx];
-}
-function deletePurchase(id) {
-  DB.purchases = DB.purchases.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/purchases/' + id);
-}
+var _crudPurchases = makeCrud({
+  cacheKey: 'purchases', api: '/api/purchases', order: 'unshift',
+  idGen: function () { return 'pu_' + uuid(); },
+  defaults: function () {
+    return {
+      date: todayStr(), name: '', spec: '', unit: '', qty: '',
+      total: 0, items: [], projectId: '',
+      reason: '', status: 'draft',
+      applicant: '', approver: '',
+      created_at: new Date().toISOString()
+    };
+  }
+});
+function loadPurchases() { return _crudPurchases.load(); }
+function createPurchase(data) { return _crudPurchases.create(data); }
+function updatePurchase(id, patch) { return _crudPurchases.update(id, patch); }
+function deletePurchase(id) { return _crudPurchases.remove(id); }
 
 /* ===== 审批管理 CRUD ===== */
-function loadApprovals() { return DB.approvals; }
-function createApproval(data) {
-  var rec = Object.assign({
-    _id: 'ap_' + uuid(),
-    type: 'generic', ref_id: '', title: '',
-    status: 'pending', applicant: '', approver: '',
-    reason: '', payload: {},
-    created_at: new Date().toISOString()
-  }, data);
-  DB.approvals.unshift(rec);
-  _syncNow('POST', '/api/approvals', rec);
-  return rec;
-}
-function updateApproval(id, patch) {
-  var idx = _findIdx(DB.approvals, id);
-  if (idx < 0) return null;
-  DB.approvals[idx] = Object.assign({}, DB.approvals[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/approvals/' + id, DB.approvals[idx]);
-  return DB.approvals[idx];
-}
-function deleteApproval(id) {
-  DB.approvals = DB.approvals.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/approvals/' + id);
-}
+var _crudApprovals = makeCrud({
+  cacheKey: 'approvals', api: '/api/approvals', order: 'unshift',
+  idGen: function () { return 'ap_' + uuid(); },
+  defaults: function () {
+    return {
+      type: 'generic', ref_id: '', title: '',
+      status: 'pending', applicant: '', approver: '',
+      reason: '', payload: {},
+      created_at: new Date().toISOString()
+    };
+  }
+});
+function loadApprovals() { return _crudApprovals.load(); }
+function createApproval(data) { return _crudApprovals.create(data); }
+function updateApproval(id, patch) { return _crudApprovals.update(id, patch); }
+function deleteApproval(id) { return _crudApprovals.remove(id); }
 
 /* ===== 物资申购合并批次 CRUD (仅管理端使用) ===== */
-function loadPurchaseGroups() { return DB.purchaseGroups; }
-function createPurchaseGroup(data) {
-  var rec = Object.assign({
-    _id: 'pg_' + uuid(),
-    name: '', created_by: '',
-    created_at: new Date().toISOString()
-  }, data);
-  DB.purchaseGroups.unshift(rec);
-  _syncNow('POST', '/api/purchase-groups', rec);
-  return rec;
-}
-function updatePurchaseGroup(id, patch) {
-  var idx = _findIdx(DB.purchaseGroups, id);
-  if (idx < 0) return null;
-  DB.purchaseGroups[idx] = Object.assign({}, DB.purchaseGroups[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/purchase-groups/' + id, DB.purchaseGroups[idx]);
-  return DB.purchaseGroups[idx];
-}
-function deletePurchaseGroup(id) {
-  DB.purchaseGroups = DB.purchaseGroups.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/purchase-groups/' + id);
-}
+var _crudPurchaseGroups = makeCrud({
+  cacheKey: 'purchaseGroups', api: '/api/purchase-groups', order: 'unshift',
+  idGen: function () { return 'pg_' + uuid(); },
+  defaults: function () {
+    return {
+      name: '', created_by: '',
+      created_at: new Date().toISOString()
+    };
+  }
+});
+function loadPurchaseGroups() { return _crudPurchaseGroups.load(); }
+function createPurchaseGroup(data) { return _crudPurchaseGroups.create(data); }
+function updatePurchaseGroup(id, patch) { return _crudPurchaseGroups.update(id, patch); }
+function deletePurchaseGroup(id) { return _crudPurchaseGroups.remove(id); }
 
 /* ===== 部门管理 CRUD ===== */
-function loadDepartments() { return DB.departments; }
-function createDepartment(data) {
-  var rec = Object.assign({
-    _id: 'd_' + uuid(),
-    name: '', code: '', parent_id: '', manager_id: '',
-    description: '', sort_order: 0,
-    created_at: new Date().toISOString()
-  }, data);
-  DB.departments.push(rec);
-  _syncNow('POST', '/api/departments', rec);
-  return rec;
-}
-function updateDepartment(id, patch) {
-  var idx = _findIdx(DB.departments, id);
-  if (idx < 0) return null;
-  DB.departments[idx] = Object.assign({}, DB.departments[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/departments/' + id, DB.departments[idx]);
-  return DB.departments[idx];
-}
-function deleteDepartment(id) {
-  DB.departments = DB.departments.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/departments/' + id);
-}
+var _crudDepartments = makeCrud({
+  cacheKey: 'departments', api: '/api/departments', order: 'push',
+  idGen: function () { return 'd_' + uuid(); },
+  defaults: function () {
+    return {
+      name: '', code: '', parent_id: '', manager_id: '',
+      description: '', sort_order: 0,
+      created_at: new Date().toISOString()
+    };
+  }
+});
+function loadDepartments() { return _crudDepartments.load(); }
+function createDepartment(data) { return _crudDepartments.create(data); }
+function updateDepartment(id, patch) { return _crudDepartments.update(id, patch); }
+function deleteDepartment(id) { return _crudDepartments.remove(id); }
 
 /* ===== 角色权限 CRUD ===== */
-function loadRoles() { return DB.roles; }
-function createRole(data) {
-  var rec = Object.assign({
-    _id: 'r_' + uuid(),
-    key: '', name: '', description: '',
-    permissions: [], modules: [], sort_order: 0,
-    created_at: new Date().toISOString()
-  }, data);
-  DB.roles.push(rec);
-  _syncNow('POST', '/api/roles', rec);
-  return rec;
-}
-function updateRole(id, patch) {
-  var idx = _findIdx(DB.roles, id);
-  if (idx < 0) return null;
-  DB.roles[idx] = Object.assign({}, DB.roles[idx], patch, { updated_at: new Date().toISOString() });
-  _syncRecord('PUT', '/api/roles/' + id, DB.roles[idx]);
-  return DB.roles[idx];
-}
-function deleteRole(id) {
-  DB.roles = DB.roles.filter(function (r) { return r._id !== id; });
-  _syncNow('DELETE', '/api/roles/' + id);
-}
+var _crudRoles = makeCrud({
+  cacheKey: 'roles', api: '/api/roles', order: 'push',
+  idGen: function () { return 'r_' + uuid(); },
+  defaults: function () {
+    return {
+      key: '', name: '', description: '',
+      permissions: [], modules: [], sort_order: 0,
+      created_at: new Date().toISOString()
+    };
+  }
+});
+function loadRoles() { return _crudRoles.load(); }
+function createRole(data) { return _crudRoles.create(data); }
+function updateRole(id, patch) { return _crudRoles.update(id, patch); }
+function deleteRole(id) { return _crudRoles.remove(id); }
 
 /* ===== 系统参数 (KV) ===== */
 function getSetting(key, defaultValue) {

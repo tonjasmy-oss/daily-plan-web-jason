@@ -473,11 +473,12 @@ function pbFullHref(rec, tab) {
  *   三种导出的文件名与文档标题均取「计划日期」而非填报日期
  * ------------------------------------------------------------ */
 function pbExportable(tab) {
-  return tab === 'daily' || tab === 'weekly' || tab === 'report';
+  return tab === 'daily' || tab === 'weekly' || tab === 'report' || tab === 'wr';
 }
 function pbExportBlockedReason(rec, tab) {
   if (tab === 'daily' && (rec.status || 'draft') !== 'approved') return '仅审批通过的日计划可导出';
   if (tab === 'weekly' && (rec.status || 'draft') !== 'approved') return '仅审批通过的周计划可导出';
+  if (tab === 'wr' && (rec.status || 'draft') !== 'approved') return '仅审批通过的计划周报可导出';
   return '';
 }
 function pbExport(rec, tab) {
@@ -491,6 +492,11 @@ function pbExport(rec, tab) {
   if (tab === 'weekly') {
     if (typeof exportWeeklyPlanToExcel !== 'function') { toast('Excel 模块未加载', 'error'); return; }
     exportWeeklyPlanToExcel(rec, loadMembers() || []);
+    return;
+  }
+  if (tab === 'wr') {
+    if (typeof exportWeeklyReportToExcel !== 'function') { toast('Excel 模块未加载', 'error'); return; }
+    exportWeeklyReportToExcel(rec);
     return;
   }
   if (tab === 'report') {
@@ -709,7 +715,7 @@ function pbOpenEdit(ov, rec, tab, opts) {
 function pbCloseDetail() {
   document.querySelectorAll('.modal-overlay.pb-overlay').forEach(function (el) { el.remove(); });
 }
-/* opts.noExport  — 隐藏导出按钮组 (审批管理页用; 该页未加载导出组件)
+/* opts.noExport  — 隐藏导出按钮组 (审批管理页默认显示, 该页已加载导出组件; 仅特殊场景需隐藏时传 true)
  * opts.keepUrl   — 关闭时不清理地址栏
  * opts.onClose   — 关闭后的回调 */
 function pbOpenDetail(rec, tab, opts) {
