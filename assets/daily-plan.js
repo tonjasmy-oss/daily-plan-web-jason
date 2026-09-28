@@ -503,11 +503,9 @@ async function initDailyPlanPage() {
       '<div class="section rp-section">' +
         '<div class="section-header-row">' +
           '<h3 style="margin:0;">计划工作内容 <span class="sec-meta">填写后点击"同步"可一键应用本条字段到所有任务</span></h3>' +
-          (editable ? '<div class="dp-section-actions">' +
-            '<button class="btn-link" id="btnAddTask" data-perm="p_create">+ 添加任务</button>' +
-          '</div>' : (canAppend() ? '<div class="dp-section-actions">' +
+          (canAppend() ? '<div class="dp-section-actions">' +
             '<button class="btn-link" id="btnAppendInline">+ 追加工作内容</button>' +
-          '</div>' : '')) +
+          '</div>' : '') +
         '</div>' +
         '<div class="rp-task-list" id="rpTaskList">' + tasksHtml + '</div>' +
       '</div>' +
@@ -591,6 +589,9 @@ async function initDailyPlanPage() {
             '<input class="input rp-time-input" type="time" data-i="' + i + '" data-k="endTime" value="' + esc(t.endTime || '') + '"' + (editable ? '' : ' disabled') + '>' +
           '</div>' +
         '</div>' +
+
+        /* 内联: 在该任务(工作内容)下方添加新任务, 点击后焦点落到新任务的内容框 */
+        (editable ? '<div class="rp-task-add-below"><button class="btn-link rp-task-add-below-btn" data-i="' + i + '" type="button">+ 添加任务</button></div>' : '') +
 
       '</div>' +
 
@@ -811,16 +812,19 @@ async function initDailyPlanPage() {
       };
     });
 
-    /* 添加任务 */
-    var btnAdd = document.getElementById('btnAddTask');
-    if (btnAdd) btnAdd.onclick = function () {
-      form.tasks.push(newTask());
-      render();
-      setTimeout(function () {
-        var rows = document.querySelectorAll('.rp-task-row');
-        if (rows.length) rows[rows.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 50);
-    };
+    /* 添加任务: 在点击的任务下方插入一条新任务, 并聚焦新任务的内容框 */
+    document.querySelectorAll('.rp-task-add-below-btn').forEach(function (btn) {
+      btn.onclick = function () {
+        var i = parseInt(btn.dataset.i, 10);
+        if (isNaN(i)) return;
+        form.tasks.splice(i + 1, 0, newTask());
+        render();
+        setTimeout(function () {
+          var el = document.querySelector('.rp-task-content-input[data-i="' + (i + 1) + '"]');
+          if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        }, 60);
+      };
+    });
 
     /* 操作按钮 */
     var sBtn = document.getElementById('btnSubmit');       if (sBtn) sBtn.onclick = submitForReview;

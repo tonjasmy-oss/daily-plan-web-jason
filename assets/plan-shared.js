@@ -442,8 +442,17 @@ function pbWeeklyReportDetail(rec) {
 
   var apN = pbAppendCount(rec, 'wr');
   return meta +
-    pbBlock('本周工作摘要', '', '<div class="pb-remarks">' +
+    pbBlock('本周工作概述', '', '<div class="pb-remarks">' +
       (esc(rec.summary) || '<span class="muted">无</span>') + '</div>') +
+    (rec.tasks && rec.tasks.length ?
+      pbBlock('本周工作内容', '', '<div class="pb-remarks">' + rec.tasks.map(function (t, i) {
+        var time = [t.startTime, t.endTime].filter(Boolean).join(' 至 ');
+        return '<div class="pb-wr-task">' +
+          '<strong>' + (i + 1) + '. ' + esc(t.content || '') + '</strong>' +
+          (t.requirement ? '<div class="muted" style="margin:2px 0 0 16px">要求: ' + esc(t.requirement) + '</div>' : '') +
+          (time ? '<div class="muted" style="margin:2px 0 0 16px">完成时间: ' + esc(time) + '</div>' : '') +
+        '</div>';
+      }).join('') + '</div>') : '') +
     (apN
       ? pbBlock('审批补充事项', '共 ' + apN + ' 条', pbAppendList(rec.items) +
           '<div class="pb-append-note">审批人在通过前追加的内容，随周报一并归档</div>')

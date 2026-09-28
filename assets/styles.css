@@ -2473,6 +2473,13 @@ table.data-table {
   background: rgba(237, 66, 69, 0.1); border-color: var(--danger); color: var(--danger);
 }
 
+/* 内联: 每条任务(工作内容)下方的"添加任务"入口 */
+.rp-task-add-below {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
 /* 字段 */
 .rp-task-field { display: flex; flex-direction: column; gap: 8px; }
 .rp-task-field.has-error .rp-task-label { color: var(--danger); }

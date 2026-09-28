@@ -26,11 +26,24 @@ var WR_STATUS_CLASS = {
   rejected: 'rejected', submitted: 'submitted'
 };
 
+/* 周报的一条工作内容(无实施人员, 字段对齐日计划任务去掉人员后的子集) */
+function newWrTask() {
+  return {
+    id: uuid().substring(0, 8),
+    content: '',        /* 工作内容 */
+    requirement: '',    /* 工作要求 */
+    startTime: '',      /* 计划完成时间(起) */
+    endTime: ''         /* 计划完成时间(止) */
+  };
+}
+
 async function initWeeklyReportPage() {
   var user = await requireLogin();
   if (!user) return;
   if (!requireModule('m_weekly_rpt')) return;
   var state = { start: '', end: '' };
+  /* 本周工作内容(多条, 无实施人员): 填报页的核心数据, 提交时一并保存 */
+  var form = { tasks: [newWrTask()] };
 
   /* 下一个周报周期: 接着已有周报的末尾往后排, 没有历史则用本周 */
   function nextPeriod() {
@@ -58,7 +71,7 @@ async function initWeeklyReportPage() {
       '<div class="hero-meta"><span>周期</span><strong>7 天</strong><span>提交后</span><strong>待审批</strong></div></div>' +
       '<div class="plan-approve-note">提交后进入审批流程，审批人可在通过前追加补充事项；审批通过后可在「报表浏览 → 计划周报」查看，不可修改。</div>' +
       '<div class="mini-stat-row" id="wrStats"></div>' +
-      '<div class="section"><h3>本周填报 <span class="sec-meta">提交后自动切换到下一个周期</span></h3>' +
+      '<div class="section" id="wrForm"><h3>本周填报 <span class="sec-meta">提交后自动切换到下一个周期</span></h3>' +
       '<div class="form-grid form-grid-2">' +
       '<div class="field-row"><label class="field-label">开始日期</label>' +
       '<input class="input" type="date" id="wrStart" value="' + esc(state.start) + '"></div>' +
@@ -66,8 +79,10 @@ async function initWeeklyReportPage() {
       '<input class="input" type="date" id="wrEnd" value="' + esc(state.end) + '">' +
       '<div class="form-hint">开始日期选定后按 7 天自动补齐, 可手动调整</div></div>' +
       '</div>' +
-      '<div class="field-row" style="margin-top:14px"><label class="field-label"><span class="required">*</span>本周工作摘要</label>' +
-      '<textarea class="input" id="wrSummary" rows="3" placeholder="例如:完成 3# 楼主体结构验收, 下周进入砌体施工"></textarea></div>' +
+      '<div class="field-row" style="margin-top:14px"><label class="field-label">本周工作概述</label>' +
+      '<textarea class="input" id="wrSummary" rows="3" placeholder="概括本周整体情况(选填)"></textarea></div>' +
+      '<div class="section-header-row" style="margin-top:16px"><h3 style="margin:0;">本周工作内容 <span class="sec-meta">每条填写工作内容 / 工作要求 / 计划完成时间</span></h3></div>' +
+      '<div class="rp-task-list" id="wrTasks"></div>' +
       '<div class="report-actions" style="justify-content:flex-start;margin-top:14px">' +
       '<button class="btn btn-primary btn-lg" id="wrSubmit" data-perm="p_create">提交周报</button></div>' +
       '</div>' +
@@ -147,10 +162,16 @@ async function initWeeklyReportPage() {
   }
 
   function submit() {
+    if (!state.start || !state.end) { toast('请填写周报周期', 'warn'); return; }
+    /* 校验至少一条有效工作内容 */
+    var validTasks = form.tasks.filter(function (t) { return (t.content || '').trim(); });
+    if (validTasks.length === 0) {
+      toast('请至少填写一条工作内容', 'warn');
+      setTimeout(function () { focusWrTask(0); }, 30);
+      return;
+    }
     var el = document.getElementById('wrSummary');
     var summary = ((el && el.value) || '').trim();
-    if (!state.start || !state.end) { toast('请填写周报周期', 'warn'); return; }
-    if (!summary) { toast('请填写本周工作摘要', 'warn'); el && el.focus(); return; }
     var period = state.start + ' ~ ' + state.end;
     createWeeklyReport({
       _id: 'wr_' + uuid().substring(0, 12),
@@ -160,6 +181,18 @@ async function initWeeklyReportPage() {
       /* 提交即进入审批流: 审批人可在通过前追加补充事项 */
       status: 'pending',
       summary: summary,
+      /* 本周工作内容(多条, 无实施人员): 仅存有效条目 */
+      tasks: form.tasks
+        .filter(function (t) { return (t.content || '').trim(); })
+        .map(function (t) {
+          return {
+            id: t.id,
+            content: (t.content || '').trim(),
+            requirement: (t.requirement || '').trim(),
+            startTime: t.startTime || '',
+            endTime: t.endTime || ''
+          };
+        }),
       items: [],
       submitter: user.name || '',
       submitted_at: new Date().toISOString(),
@@ -188,6 +221,79 @@ async function initWeeklyReportPage() {
 
   var btn = document.getElementById('wrSubmit');
   if (btn) btn.onclick = submit;
+
+  /* 本周工作内容任务列表: 渲染 + 交互(委托绑定, 只绑一次) */
+  renderWrTasks();
+  bindWrFormOnce();
+
+  function focusWrTask(idx) {
+    var el = document.querySelector('#wrTasks .rp-task-content-input[data-i="' + idx + '"]');
+    if (el) { el.focus(); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  }
+  function renderWrTaskRow(t, i) {
+    return '<div class="rp-task-row" data-i="' + i + '">' +
+      '<div class="rp-task-num">' + (i + 1) + '</div>' +
+      '<div class="rp-task-body">' +
+        '<div class="rp-task-field rp-task-content">' +
+          '<label class="rp-task-label">工作内容 <span class="required">*</span></label>' +
+          '<textarea class="textarea rp-task-content-input" data-i="' + i + '" data-k="content" rows="2" placeholder="请输入本条工作内容">' + esc(t.content || '') + '</textarea>' +
+        '</div>' +
+        '<div class="rp-task-field rp-task-requirement">' +
+          '<label class="rp-task-label">工作要求</label>' +
+          '<textarea class="textarea rp-task-requirement-input" data-i="' + i + '" data-k="requirement" rows="2" placeholder="本条工作要求 / 验收标准">' + esc(t.requirement || '') + '</textarea>' +
+        '</div>' +
+        '<div class="rp-task-field rp-task-time">' +
+          '<label class="rp-task-label">计划完成时间 <span class="rp-task-hint">几点几时至几点几分</span></label>' +
+          '<div class="rp-task-time-row">' +
+            '<input class="input rp-time-input" type="time" data-i="' + i + '" data-k="startTime" value="' + esc(t.startTime || '') + '">' +
+            '<span class="rp-time-sep">至</span>' +
+            '<input class="input rp-time-input" type="time" data-i="' + i + '" data-k="endTime" value="' + esc(t.endTime || '') + '">' +
+          '</div>' +
+        '</div>' +
+        '<div class="rp-task-add-below"><button class="btn-link rp-task-add-below-btn" data-i="' + i + '" type="button">+ 添加任务</button></div>' +
+      '</div>' +
+      '<button class="rp-task-remove" data-i="' + i + '" type="button" title="删除任务">' + rpIconTrash() + '</button>' +
+    '</div>';
+  }
+  function renderWrTasks() {
+    var host = document.getElementById('wrTasks');
+    if (!host) return;
+    host.innerHTML = form.tasks.map(function (t, i) { return renderWrTaskRow(t, i); }).join('');
+  }
+  function bindWrFormOnce() {
+    var formEl = document.getElementById('wrForm');
+    if (!formEl) return;
+    formEl.addEventListener('input', function (e) {
+      var t = e.target;
+      var i = parseInt(t.dataset.i, 10);
+      if (isNaN(i)) return;
+      var k = t.dataset.k;
+      if (k && (k === 'content' || k === 'requirement' || k === 'startTime' || k === 'endTime')) {
+        form.tasks[i][k] = t.value;
+      }
+    });
+    formEl.addEventListener('click', function (e) {
+      var add = (e.target.closest && e.target.closest('.rp-task-add-below-btn'));
+      if (add) {
+        var i = parseInt(add.dataset.i, 10);
+        if (!isNaN(i)) {
+          form.tasks.splice(i + 1, 0, newWrTask());
+          renderWrTasks();
+          setTimeout(function () { focusWrTask(i + 1); }, 60);
+        }
+        return;
+      }
+      var rm = (e.target.closest && e.target.closest('.rp-task-remove'));
+      if (rm) {
+        var j = parseInt(rm.dataset.i, 10);
+        if (!isNaN(j)) {
+          if (form.tasks.length <= 1) form.tasks[0] = newWrTask();
+          else form.tasks.splice(j, 1);
+          renderWrTasks();
+        }
+      }
+    });
+  }
 }
 window.initWeeklyReportPage = initWeeklyReportPage;
 window.addEventListener('DOMContentLoaded', initWeeklyReportPage);
