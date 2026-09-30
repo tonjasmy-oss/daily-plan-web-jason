@@ -966,11 +966,16 @@ body.login-page {
  * ============================================================ */
 .table-wrap {
   background: var(--bg-card); border-radius: var(--radius-lg);
-  border: 1px solid var(--border); overflow: hidden;
+  border: 1px solid var(--border);
+  /* P2: 移动端/窄弹窗下允许横向滚动, 而不是把多列表格压扁(原 overflow:hidden 会裁掉右列且无滚动条) */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 table.data-table {
   width: 100%; border-collapse: collapse;
   font-size: 13px;
+  /* 多列表格(工作内容/要求/人员/时间)在小屏下保持可读列宽, 超出时由 .table-wrap 横向滚动 */
+  min-width: 560px;
 }
 .data-table thead {
   background: var(--bg-elevated);
@@ -1177,6 +1182,13 @@ table.data-table {
 .task-status-summary {
   display: grid; grid-template-columns: repeat(5, 1fr);
   gap: 8px;
+}
+/* P3: 手机上 5 列太挤, 降级为 3 列 / 极窄屏 2 列 */
+@media (max-width: 640px) {
+  .task-status-summary { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 400px) {
+  .task-status-summary { grid-template-columns: repeat(2, 1fr); }
 }
 .task-status-summary .status-pill {
   background: var(--bg-elevated); border: 1px solid var(--border);
@@ -2883,6 +2895,13 @@ table.data-table {
   .dp-plan-banner { padding: 14px 16px; }
   .dp-plan-banner-text { font-size: 15px; }
   .dp-approval-row { grid-template-columns: 80px 1fr; }
+  /* P3: 任务行在手机上竖排 —— 序号+正文占满宽, 操作区移到下方, 正文不再被挤压 */
+  .rp-task-row { flex-direction: column; align-items: stretch; }
+  .rp-task-num { align-self: flex-start; }
+  .rp-task-side-actions {
+    margin-left: 0; margin-top: 10px;
+    flex-direction: row; justify-content: flex-end;
+  }
 }
 
 /* form-grid / form-row (同步弹窗内使用) */
